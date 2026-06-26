@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "coordguard",
+  "displayName": "coordguard",
+  "version": "1.0.0",
+  "description": "Hard anti-clobber guard for multi-instance Claude Code. On Write/Edit it blocks (PreToolUse deny) when the target file changed on disk since this session last read it — the signature of another Claude instance editing the same file. Kept separate from coordkit so the bus stays strictly never-blocks.",
+  "author": {
+    "name": "codehornets",
+    "email": "codehornets@gmail.com"
+  },
+  "keywords": [
+    "coordination",
+    "concurrency",
+    "guard",
+    "anti-clobber",
+    "hooks",
+    "safety"
+  ],
+  "license": "MIT"
+}

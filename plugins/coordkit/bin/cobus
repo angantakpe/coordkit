@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# cobus — coordkit shared-context ledger CLI.
+#
+# Forwards verbs to the ledger transport (the same verbs as the /led command),
+# so the cross-instance ledger is drivable from a plain shell as well as from
+# inside Claude.
+#
+# Usage: cobus <verb> [args...]
+#
+# Resolves the plugin root from $CLAUDE_PLUGIN_ROOT, falling back to its own
+# location so it works whether or not the plugin runtime injects the env var or
+# puts bin/ on PATH.
+set -uo pipefail
+
+ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+LEDGER="${ROOT}/scripts/claude-ledger.sh"
+
+usage() {
+  cat <<'EOF'
+cobus — coordkit shared-context ledger CLI
+
+Usage: cobus <verb> [args...]
+
+Verbs:
+  board                       show the projected task queue
+  digest | catchup            full shared-context digest
+  note "<text>"               drop a durable note for all instances
+  decide <subject> "<text>"   record a decision (latest per subject wins)
+  ask <subject> "<q>"         open a question thread
+  answer <subject> "<a>"      answer / close a question thread
+  task "<desc>"               queue work (add 'dep:<subject>' to order it)
+  next                        auto-claim the first open task whose deps are met
+  claim <subject>             lease a task
+  done <subject>              mark a task complete
+  block <subject> "<why>"     mark a task blocked
+
+Setup / transport:
+  init-git [room] [remote]    enable git-mode sharing for this repo
+  sync                        replicate the git-mode log (run on a timer, not a hook)
+  migrate                     append the v2 schema-upgrade marker (append-only)
+EOF
+}
+
+case "${1:-}" in
+  ""|-h|--help|help) usage; exit 0 ;;
+esac
+
+# Setup/transport verbs route to their own scripts (not the ledger dispatch).
+case "${1:-}" in
+  init-git) shift; exec bash "${ROOT}/scripts/init-git.sh" "$@" ;;
+  sync)     shift; exec bash "${ROOT}/bin/sync.sh" "$@" ;;
+  migrate)  shift; exec bash "${ROOT}/scripts/migrate.sh" "$@" ;;
+esac
+
+if [ ! -x "$LEDGER" ]; then
+  echo "cobus: ledger transport not found or not executable: $LEDGER" >&2
+  exit 127
+fi
+
+exec "$LEDGER" "$@"

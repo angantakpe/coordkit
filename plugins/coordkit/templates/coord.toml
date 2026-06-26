@@ -1,0 +1,41 @@
+# coord.toml — coordkit's committed, SECRET-FREE coordination pointer.
+#
+# This file is COMMITTED to the repo. A fresh clone reads it to self-describe and
+# auto-join the right coordination mode/room with no extra setup. It is a POINTER,
+# not a credential store.
+#
+# >>> NEVER put tokens, API keys, or any secret in this file. <<<
+# Secrets live in the OS keychain or environment only, e.g.:
+#   COORDKIT_RELAY_TOKEN   bearer token for the relay (relay mode)
+# Git auth uses your normal git credentials (SSH key / credential helper).
+#
+# Every value here can be overridden at runtime by an env var (env wins over file):
+#   mode      -> COORDKIT_MODE
+#   room_id   -> COORDKIT_ROOM_ID
+#   relay_url -> COORDKIT_RELAY_URL
+
+# Active transport: "local" | "git" | "relay".
+#   local : same-machine only (default). Zero network, zero deps.
+#   git   : team async sharing over a plain git remote. No server, no daemon.
+#   relay : optional real-time fan-out cache on top of a durable backing (degraded).
+mode = "local"
+
+# Logical coordination channel. All clones sharing a room see each other's events.
+# Use one room per team/project; keep it stable across clones.
+room_id = "default"
+
+# Git mode: the remote that carries the committed coordination log. Empty = use the
+# repo's existing default remote/branch. (No credentials here — git handles auth.)
+remote = ""
+
+# Relay mode: base URL of the fan-out relay (cache, NOT source of truth). Empty in
+# git/local mode. The relay token is supplied out-of-band via COORDKIT_RELAY_TOKEN.
+relay_url = ""
+
+# Wire/protocol version of the event line shape. Bump when the schema changes so
+# readers can refuse or adapt to lines they don't understand.
+proto = "1"
+
+# Minimum reader version required to safely interpret this room's events. A clone
+# older than this should warn rather than silently mis-read newer events.
+min_reader = "2.0.0"

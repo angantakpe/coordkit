@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coordkit/schema/event/2.0",
+  "title": "coordkit event envelope v2",
+  "description": "One append-only JSON event per line in the coordination log. v1 events (no schema_version) are read tolerantly as 1.0 and up-converted on read by migrations/0001_v1_to_v2.sh — stored lines are NEVER rewritten.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "eid", "id", "actor", "clock", "type", "subject"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Envelope version, major.minor. Readers MUST ignore unknown fields and treat a missing value as \"1.0\"."
+    },
+    "eid": {
+      "type": "string",
+      "description": "Content-addressed id over canonical(event minus eid,sig). The cross-replica DEDUP key and audit anchor. e.g. \"sha256:9f3c…\" (blake3 if b3sum is present)."
+    },
+    "id": {
+      "type": "string",
+      "description": "Sortable unique id (ULID-like). Tiebreak + display only; not the dedup key."
+    },
+    "actor": {
+      "type": "string",
+      "description": "STABLE per (machine + user + clone) site id. Partitions the committed filespace so two writers never touch the same segment file."
+    },
+    "clock": {
+      "type": "object",
+      "description": "Per-actor monotonic clock: wall-ms + counter. Advances past the max observed clock. Total order across replicas = sort by (clock.p, clock.c, actor) — machine-independent, NOT wall-clock last-writer-wins.",
+      "required": ["p", "c"],
+      "properties": {
+        "p": { "type": "integer", "description": "wall-clock milliseconds" },
+        "c": { "type": "integer", "description": "monotonic counter, advanced past max observed" }
+      }
+    },
+    "seq": {
+      "type": "integer",
+      "description": "LOCAL-only convenience counter (per physical log). NOT authoritative for cross-machine order — use clock."
+    },
+    "sid":    { "type": "string", "description": "Originating Claude session id." },
+    "sid8":   { "type": "string", "description": "First 8 chars of sid (display)." },
+    "user":   { "type": "string", "description": "Identity for multi-user trust (server-stamped from the verified token in relay mode)." },
+    "branch": { "type": "string", "description": "Git branch at write time (or \"no-git\")." },
+    "type": {
+      "type": "string",
+      "description": "Event type. Readers MUST tolerate unknown types as opaque notes.",
+      "enum": ["note", "decision", "question", "answer", "task", "claim", "done", "block"]
+    },
+    "subject": { "type": "string", "description": "Reconciliation key: the latest non-superseded event per subject wins." },
+    "body":    { "type": "string", "description": "Free-text payload. A task body may carry 'dep:<subject>' tokens for ordering." },
+    "refs":    { "type": "array", "items": { "type": "string" }, "description": "Content refs (eids) instead of fragile numeric seq refs." },
+    "tags":    { "type": "array", "items": { "type": "string" } },
+    "lease": {
+      "description": "ALWAYS an object from v2 onward (never a bare scalar). null when not a claim.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["until"],
+          "properties": {
+            "until": { "type": "integer", "description": "epoch seconds the lease is valid until" },
+            "owner": { "type": "string", "description": "actor holding the lease" },
+            "sid8":  { "type": "string" }
+          }
+        }
+      ]
+    },
+    "supersedes": {
+      "type": ["string", "null"],
+      "description": "eid of the prior version of this subject (explicit version chain for audit/history)."
+    },
+    "sig": {
+      "type": ["string", "null"],
+      "description": "OPTIONAL detached ed25519 signature over canonical(event minus sig). Absent (null) in default local mode."
+    }
+  }
+}

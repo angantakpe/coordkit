@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "coordkit-marketplace",
+  "owner": {
+    "name": "codehornets",
+    "email": "codehornets@gmail.com"
+  },
+  "description": "Multi-instance Claude Code coordination: a shared bus + ledger that warns about concurrent edits (coordkit), and an optional hard anti-clobber blocker (coordguard).",
+  "plugins": [
+    {
+      "name": "coordkit",
+      "source": "./plugins/coordkit",
+      "description": "Same-machine coordination bus + cross-instance ledger. WARN-only: tracks who else is live in a repo and which files they touch, and surfaces it — never blocks a tool call.",
+      "version": "2.0.0",
+      "author": {
+        "name": "codehornets",
+        "email": "codehornets@gmail.com"
+      },
+      "keywords": [
+        "coordination",
+        "multi-instance",
+        "concurrency",
+        "bus",
+        "ledger",
+        "hooks"
+      ],
+      "category": "workflow"
+    },
+    {
+      "name": "coordguard",
+      "source": "./plugins/coordguard",
+      "description": "Hard anti-clobber guard. Blocks a Write/Edit when a file changed on disk since this session last saw it (a sibling Claude instance likely edited it). Kept separate from coordkit so the bus stays strictly never-blocks.",
+      "version": "1.0.0",
+      "author": {
+        "name": "codehornets",
+        "email": "codehornets@gmail.com"
+      },
+      "keywords": [
+        "coordination",
+        "concurrency",
+        "guard",
+        "anti-clobber",
+        "hooks",
+        "safety"
+      ],
+      "category": "safety"
+    }
+  ]
+}

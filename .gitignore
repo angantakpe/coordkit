@@ -1,0 +1,3 @@
+# nothing runtime here — coordkit emits state into a repo's .claude-bus / .claude/coord, never into the marketplace
+.DS_Store
+*.swp

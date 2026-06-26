@@ -1,0 +1,7 @@
+{
+  "schema": "coordkit/event",
+  "protocol": "2.0",
+  "min_reader": "2.0",
+  "compaction_epoch": 0,
+  "notes": "Committed alongside a shared log. A reader whose supported protocol < this protocol degrades to READ-ONLY and surfaces an upgrade notice rather than corrupting. min_reader is the lowest envelope version a current reader must understand."
+}

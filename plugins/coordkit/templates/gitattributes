@@ -1,0 +1,9 @@
+# Installed as <repo>/.claude/coord/.gitattributes in git mode.
+#
+# coordkit's git transport partitions the event log so each actor only appends to
+# its OWN segment files — concurrent writers touch disjoint paths, so merges are
+# structurally conflict-free. `merge=union` is the BACKSTOP for the one pathological
+# case (the same actor id reused from two clones): instead of a conflict, git keeps
+# the union of both sides' lines. Append-only NDJSON + dedup-by-eid on read makes a
+# duplicated line harmless, so union is always safe here.
+*.ndjson merge=union
