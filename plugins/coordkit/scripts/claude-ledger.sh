@@ -116,9 +116,13 @@ fi
 if [ "$_ck_want" = 1 ] && [ -f "$_ck_lib" ]; then
   . "$_ck_lib" 2>/dev/null && command -v logstore_readall >/dev/null 2>&1 && CK_LOGSTORE=1
 fi
-# Shared modes need the versioned envelope (eid dedup + clock order) — default v2
-# emission ON when the logstore is active, unless the caller pinned it off.
-[ "$CK_LOGSTORE" = 1 ] && : "${COORDKIT_EMIT_V2:=1}"
+# v2 envelope is the shipped DEFAULT (carries seq + eid-dedup + clock order, and
+# is schema-valid — see schema/event.schema.json). Every read path in this file
+# (digest, board, task_status, delta injection, prompt) keys off fields that v2
+# and v1 both expose (seq/type/subject/body/branch/sid/sid8), and task_status
+# already handles lease as object-or-scalar — so v2 is read-compatible with mixed
+# and legacy ledgers. Pin COORDKIT_EMIT_V2=0 to force the flat v1 line.
+: "${COORDKIT_EMIT_V2:=1}"
 [ "$CK_LOGSTORE" = 1 ] && trap 'rm -f "${bus}/.lview.$$" 2>/dev/null' EXIT
 
 refresh_view() {  # logstore mode: materialize the ordered union into the READ source
@@ -169,14 +173,49 @@ _ck_emit_v2() {  # seq type subject body refs tags lease -> one v2 JSON line on 
   printf '%s' "$base" | jq -c --arg eid "$eid" '.eid=$eid' 2>/dev/null
 }
 
+# ensure a STABLE per-(machine+user+clone) actor identity in the persistent
+# plugin data dir. This is bootstrap.sh's essential work, inlined here so the
+# ledger is SELF-bootstrapping (bootstrap.sh is not wired into any hook). Cheap
+# and idempotent: a single jq validation once the file exists, a no-op after the
+# first successful write. Best-effort — never fails ensure_dirs.
+ensure_site() {
+  local site="${CK_DATA}/site.json" seed h actor
+  [ -s "$site" ] && jq -e '.actor' "$site" >/dev/null 2>&1 && return 0
+  mkdir -p "$CK_DATA" 2>/dev/null || return 0
+  seed="${HOSTNAME:-$(hostname 2>/dev/null || echo host)}-${USER:-$(id -un 2>/dev/null || echo user)}-${HOME:-/}"
+  if command -v b3sum >/dev/null 2>&1; then h="$(printf '%s' "$seed" | b3sum 2>/dev/null | cut -c1-8)"
+  else h="$(printf '%s' "$seed" | sha256sum 2>/dev/null | cut -c1-8)"; fi
+  actor="site-${h:-00000000}"
+  jq -nc --arg actor "$actor" --arg user "${USER:-}" --arg host "${HOSTNAME:-}" \
+    '{actor:$actor, user:$user, host:$host}' > "$site" 2>/dev/null || return 0
+  return 0
+}
+
 ensure_dirs() {
   mkdir -p "$agents" "$cursors" 2>/dev/null || return 1
   [ -f "${bus}/.gitignore" ] || printf '*\n' > "${bus}/.gitignore" 2>/dev/null
   [ -f "$LWRITE" ] || : > "$LWRITE" 2>/dev/null
+  ensure_site   # self-bootstrap the stable actor id (best-effort, no-op once done)
   return 0
 }
 
-max_seq() { tail -n1 "$ledger" 2>/dev/null | jq -r '.seq // 0' 2>/dev/null || echo 0; }
+max_seq() {
+  # The TRUE maximum seq over all parseable lines. A corrupt / truncated /
+  # seq-less LAST line must NEVER reset this to 0 — doing so would hand the next
+  # event seq=1 and permanently blind every `select(.seq > N)` cursor.
+  [ -s "$ledger" ] || { echo 0; return; }
+  # Fast path (O(1) on huge ledgers): the last line almost always carries the
+  # max seq. Trust it only when it yields a plain integer; otherwise fall back to
+  # a full tolerant scan.
+  local last
+  last="$(tail -n1 "$ledger" 2>/dev/null | jq -r '.seq // empty' 2>/dev/null)"
+  case "$last" in
+    ''|*[!0-9]*) : ;;                       # unparseable/seq-less → full scan
+    *) printf '%s' "$last"; return ;;
+  esac
+  # Full scan: max seq across every line that parses, tolerating garbage lines.
+  jq -Rrn '[inputs | fromjson? | .seq? | numbers] | max // 0' "$ledger" 2>/dev/null || echo 0
+}
 
 # append_event TYPE SUBJECT BODY [REFS_JSON] [TAGS_JSON] [LEASE]
 # Helpers read type/subject/body/refs/tags/lease/seq from the caller's scope
@@ -202,7 +241,13 @@ append_event() {
   ensure_dirs || return 1
   local type="$1" subject="$2" body="$3" refs="${4:-[]}" tags="${5:-[]}" lease="${6:-0}"
   if [ "$CK_LOGSTORE" = 1 ]; then
-    _ae_emit_one                        # logstore_append owns the flock — avoid double-lock deadlock
+    # logstore_append owns its OWN flock (transports/lib.sh) for the physical
+    # byte-append, so we must NOT flock that same file here or the two locks
+    # deadlock. But max_seq→emit still has to be atomic across instances, else two
+    # writers read the same max and mint DUPLICATE seqs. Serialize seq allocation
+    # on a SEPARATE dedicated lock file (fd 7): two DIFFERENT flock files can never
+    # deadlock — this lock orders seq allocation, logstore's lock orders the write.
+    ( flock 7; _ae_emit_one ) 7>"${lock}.seq"
   else
     ( flock 9; _ae_emit_one ) 9>"$lock" # direct mode: today's atomic seq+append
   fi
@@ -218,8 +263,15 @@ owner_live() {
 
 # last event (full json) for a subject of a given type
 last_ev() { jq -c --arg s "$1" --arg t "$2" 'select(.subject==$s and .type==$t)' "$ledger" 2>/dev/null | tail -n1; }
-# max seq for a subject+type (or 0)
-seq_of() { local e; e="$(last_ev "$1" "$2")"; [ -n "$e" ] && printf '%s' "$e" | jq -r '.seq' 2>/dev/null || echo 0; }
+# max seq for a subject+type (or 0). ALWAYS echoes a plain integer so callers'
+# `[ "$x" -gt 0 ]` comparisons can never explode with "integer expression
+# expected" when jq yields null/empty on a v1 or seq-less line.
+seq_of() {
+  local e n; e="$(last_ev "$1" "$2")"
+  [ -n "$e" ] || { echo 0; return; }
+  n="$(printf '%s' "$e" | jq -r '.seq // 0' 2>/dev/null)"
+  case "$n" in ''|*[!0-9]*) echo 0 ;; *) echo "$n" ;; esac
+}
 
 # echo the status of a task subject: done | blocked | claimed:<sid8> | open
 task_status() {
@@ -231,8 +283,9 @@ task_status() {
   if [ "$cl" -gt 0 ] && [ "$cl" -gt "$dn" ]; then
     local ev; ev="$(last_ev "$s" claim)"
     owner="$(printf '%s' "$ev" | jq -r '.sid')"
-    lease="$(printf '%s' "$ev" | jq -r 'if (.lease|type)=="object" then (.lease.until // 0) else (.lease // 0) end')"
-    if [ "${lease:-0}" -gt "$(now)" ] && owner_live "$owner"; then
+    lease="$(printf '%s' "$ev" | jq -r 'if (.lease|type)=="object" then (.lease.until // 0) else (.lease // 0) end' 2>/dev/null)"
+    case "$lease" in ''|*[!0-9]*) lease=0 ;; esac   # non-numeric/null lease → treat as expired
+    if [ "$lease" -gt "$(now)" ] && owner_live "$owner"; then
       echo "claimed:$(printf '%s' "$ev" | jq -r '.sid8')"; return
     fi
     echo open; return            # lease lapsed or owner dead -> reclaimable
@@ -379,7 +432,15 @@ case "$phase" in
     ensure_dirs
     cur="$(get_cursor)"; mx="$(max_seq)"
     if [ "$mx" -gt "$cur" ]; then
-      delta="$(jq -c --argjson c "$cur" 'select(.seq > $c and (.sid != "'"$sid"'"))' "$ledger" 2>/dev/null)"
+      # NOTE: seq is a LOCAL-only counter (per physical log) — see the schema's
+      # `seq` description. Cursors here dedupe by seq, which is correct in direct
+      # mode (single monotonic writer) but is NOT authoritative cross-machine in
+      # logstore/relay mode, where the total order is (clock.p, clock.c, actor).
+      # A full clock-based read path is out of scope for this pass; the practical
+      # effect is that after a cross-replica merge a few already-seen events may be
+      # re-surfaced once. eid (content hash) is the durable dedup key if a future
+      # pass wants exactly-once injection.
+      delta="$(jq -c --argjson c "$cur" --arg me "$sid" 'select(.seq > $c and (.sid != $me))' "$ledger" 2>/dev/null)"
       if [ -n "$delta" ]; then
         body="🧠 New shared-context events from other instances:"$'\n'
         body+="$(printf '%s\n' "$delta" | tail -n "$PAGE" | while IFS= read -r l; do

@@ -13,9 +13,24 @@
 #   logstore_readall                     emit ALL events (the UNION across every
 #                                        actor), newline-delimited, deterministically
 #                                        ordered + deduped, to stdout.
-#   logstore_tail <cursor>               emit events after <cursor> (a numeric count
-#                                        into the deterministic total order) — for
-#                                        incremental context injection.
+#   logstore_since <watermark>           emit events STRICTLY AFTER <watermark> in the
+#                                        deterministic total order — for incremental
+#                                        context injection. <watermark> is a total-order
+#                                        key "p:c:actor" (see logstore_watermark). This
+#                                        is the correct incremental cursor: a late event
+#                                        that sorts before the watermark is simply "in
+#                                        the past" and excluded, never a source of
+#                                        shifted-position drops or duplicates.
+#   logstore_watermark                   echo the total-order key ("p:c:actor") of the
+#                                        LAST event, i.e. the watermark to pass to a
+#                                        subsequent logstore_since.
+#   logstore_tail <cursor>               LEGACY, prefer logstore_since. Emit events after
+#                                        <cursor> (a numeric COUNT into the total order).
+#                                        Positional and therefore lossy: because the total
+#                                        order is recomputed on every call, a late-arriving
+#                                        event that sorts earlier shifts positions, so the
+#                                        count-based boundary can skip a real event or
+#                                        re-emit one. Kept only for back-compat.
 #   logstore_mode                        echo the active mode.
 #
 # Adapter contract (each transports/<mode>.sh implements):
@@ -72,16 +87,26 @@ __logstore_coordtoml() {
 
 # --------------------------------------------------------------------------- #
 # Tiny TOML reader — top-level `key = "value"` only (no deps, no toml lib).
-# Stops at the first [table] header, strips quotes/inline-comment/whitespace.
-# Sufficient for the flat coord.toml pointer (mode, room_id, remote, ...).
+# Stops at the first [table] header. Handles quoting BEFORE comments so a quoted
+# value containing '#' (e.g. a relay URL with a fragment) is preserved: for a
+# quoted value we take everything up to the closing quote and ignore any trailing
+# comment; only for an UNQUOTED value do we treat a whitespace-preceded '#' as the
+# start of an inline comment. Sufficient for the flat coord.toml pointer
+# (mode, room_id, remote, relay_url, ...).
 # --------------------------------------------------------------------------- #
 __logstore_toml_get() {
-  local file="$1" key="$2"
+  local file="$1" key="$2" raw
   [ -f "$file" ] || return 1
-  sed -n '/^[[:space:]]*\[/q; p' "$file" \
+  raw="$(sed -n '/^[[:space:]]*\[/q; p' "$file" \
     | grep -E "^[[:space:]]*${key}[[:space:]]*=" \
     | head -n1 \
-    | sed -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//; s/^\"//; s/\"[[:space:]]*\$//; s/^'//; s/'[[:space:]]*\$//; s/[[:space:]]*\$//"
+    | sed -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//")"
+  case "$raw" in
+    '"'*)  raw="${raw#\"}"; raw="${raw%%\"*}" ;;                       # double-quoted
+    "'"*)  raw="${raw#\'}"; raw="${raw%%\'*}" ;;                       # single-quoted
+    *)     raw="$(printf '%s' "$raw" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]*$//')" ;;
+  esac
+  printf '%s' "$raw"
 }
 
 # --------------------------------------------------------------------------- #
@@ -113,12 +138,18 @@ __logstore_have() { declare -F "$1" >/dev/null 2>&1; }
 
 # Shared actor extraction — the segment partition is derived from the event's OWN
 # `actor` field so two writers never target the same file. Falls back to
-# COORDKIT_ACTOR then "local". Sanitised to a filesystem-safe token.
+# COORDKIT_ACTOR then "local". Sanitised to a filesystem-safe token; the pure-dot
+# tokens "" / "." / ".." are rejected to "_invalid" so a crafted actor can never
+# resolve the log dir to the partition root or escape it (e.g. base/log/..).
 __logstore_actor_of() {
   local line="$1" a
   a="$(printf '%s' "$line" | jq -r 'if type=="object" then (.actor // empty) else empty end' 2>/dev/null)"
   [ -n "$a" ] || a="${COORDKIT_ACTOR:-local}"
-  printf '%s' "$a" | tr -c 'A-Za-z0-9._-' '_'
+  a="$(printf '%s' "$a" | tr -c 'A-Za-z0-9._-' '_')"
+  case "$a" in
+    ''|.|..) a="_invalid" ;;
+  esac
+  printf '%s' "$a"
 }
 
 # --------------------------------------------------------------------------- #
@@ -166,14 +197,85 @@ __total_order() {
 }
 
 # --------------------------------------------------------------------------- #
-# Locked append — lib owns the flock so every adapter inherits atomicity for free.
-# Each adapter only has to expose __<mode>_lockfile and a lock-free __<mode>_append.
+# Watermark helpers — the correct incremental cursor over the total order.
+#
+# A watermark is the total-order key of the last-seen event, encoded "p:c:actor"
+# (p and c are integers so the first two ':' are unambiguous field separators; the
+# actor — which may itself contain ':' — is the remainder). __watermark_of reads a
+# total-ordered stream and echoes the key of its LAST line. __filter_since keeps only
+# lines whose key is strictly greater than a given watermark, comparing (p,c) numeric
+# then actor lexicographically — the SAME order as __total_order. An empty or
+# unparseable watermark means "no cursor yet" and passes everything through (safe: it
+# can only over-deliver, never drop). Input is assumed already deduped + ordered.
 # --------------------------------------------------------------------------- #
+__watermark_of() {
+  jq -Rrn '
+    [inputs] | map(select(. != "")) | (last // "")
+    | if . == "" then ""
+      else . as $raw
+        | ($raw | (try fromjson catch null)) as $p
+        | (if ($p | type) == "object" then $p else {} end) as $o
+        | "\($o.clock.p // 0):\($o.clock.c // 0):\($o.actor // "")"
+      end
+  '
+}
+
+__filter_since() {
+  local wm="${1:-}"
+  jq -Rrn --arg wm "$wm" '
+    ($wm | if . == "" then null
+           else (capture("^(?<p>[0-9]+):(?<c>[0-9]+):(?<a>.*)$") // null) end) as $w
+    | ($w | if . == null then null else {p: (.p|tonumber), c: (.c|tonumber), a: .a} end) as $w
+    | [inputs] | map(select(. != ""))
+    | map(. as $raw
+          | ($raw | (try fromjson catch null)) as $p
+          | (if ($p | type) == "object" then $p else {} end) as $o
+          | { raw: $raw, p: ($o.clock.p // 0), c: ($o.clock.c // 0), a: ($o.actor // "") })
+    | map(select(
+        $w == null
+        or (.p > $w.p)
+        or (.p == $w.p and .c > $w.c)
+        or (.p == $w.p and .c == $w.c and .a > $w.a)
+      ))
+    | .[].raw
+  '
+}
+
+# --------------------------------------------------------------------------- #
+# Locked append — lib owns the lock so the local/git adapters inherit atomicity for
+# free (each only exposes __<mode>_lockfile and a lock-free __<mode>_append). NOTE:
+# the relay adapter is special-cased in logstore_append and drives its own backing
+# through this same helper, so it too is covered — but it is not wrapped a second time.
+#
+# flock(1) is preferred, with two robustness fixes:
+#   * `-w 5` bounds the wait so a wedged holder can't stall every Claude hook forever
+#     (append then returns non-zero, which propagates to the caller).
+#   * When flock(1) is missing (e.g. stock macOS), fall back to a bounded mkdir-based
+#     mutex so appends are still serialised instead of silently interleaving/dropping.
+# The append's own exit status is propagated so a caller can see a true failure.
+# --------------------------------------------------------------------------- #
+__logstore_mkdir_lock() {
+  local lockdir="$1" i=0
+  while ! mkdir "$lockdir" 2>/dev/null; do
+    i=$((i + 1))
+    [ "$i" -ge 50 ] && return 1          # ~5s bound at 0.1s/iter
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+  return 0
+}
+
 __logstore_locked_append() {
-  local mode="$1" line="$2" lock
+  local mode="$1" line="$2" lock rc
   lock="$("__${mode}_lockfile")"
   mkdir -p "$(dirname "$lock")" 2>/dev/null || true
-  ( flock 9 || exit 1; "__${mode}_append" "$line" ) 9>"$lock"
+  if command -v flock >/dev/null 2>&1; then
+    ( flock -w 5 9 || exit 1; "__${mode}_append" "$line" ) 9>"$lock"
+  else
+    __logstore_mkdir_lock "${lock}.d" || return 1
+    "__${mode}_append" "$line"; rc=$?
+    rmdir "${lock}.d" 2>/dev/null || true
+    return "$rc"
+  fi
 }
 
 # --------------------------------------------------------------------------- #
@@ -188,15 +290,24 @@ logstore_append() {
 
   case "$COORDKIT_RESOLVED_MODE" in
     relay)
-      # Relay manages its own durability (local fold) + best-effort fan-out. If it
-      # cannot guarantee durability it returns non-zero, and we fall back git→local
-      # so nothing is ever lost. The re-append is idempotent: dedup is by eid.
+      # Relay manages its own durability (fold into its configured backing) + a
+      # best-effort fan-out. If durability can't be met it returns non-zero and we
+      # fall back so nothing is ever lost. CRUCIAL: retry the CONFIGURED backing
+      # FIRST, because relay-mode READS come from that backing — spilling to a
+      # different store would persist the event but hide it from relay readers. Only
+      # after the backing is exhausted do we spill to the other stores as a last
+      # resort. The re-append is idempotent: dedup is by eid.
       if __relay_append "$line"; then return 0; fi
-      printf 'coordkit[relay]: append could not be made durable; falling back git→local\n' >&2
-      if __logstore_have __git_append; then
+      local backing; backing="$(__relay_backing)"
+      printf 'coordkit[relay]: append could not be made durable; retrying backing=%s then spilling\n' "$backing" >&2
+      __logstore_locked_append "$backing" "$line" && return 0
+      if [ "$backing" != git ] && __logstore_have __git_append; then
         __logstore_locked_append git "$line" && return 0
       fi
-      __logstore_locked_append local "$line"
+      if [ "$backing" != local ]; then
+        __logstore_locked_append local "$line" && return 0
+      fi
+      return 1
       ;;
     git)
       __logstore_locked_append git "$line"
@@ -217,6 +328,24 @@ logstore_tail() {
   case "$n" in (*[!0-9]*|'') n=0 ;; esac
   __logstore_resolve_mode
   "__${COORDKIT_RESOLVED_MODE}_tail" "$n"
+}
+
+# logstore_since <watermark> — the correct incremental cursor. Emits every event
+# STRICTLY AFTER <watermark> in the deterministic total order, filtering the same
+# union readall produces (so it is mode-agnostic — the read path is identical in
+# every mode). An empty watermark returns the full union. See __filter_since /
+# logstore_watermark and the interface note above logstore_tail for why this is
+# loss-free where the positional tail is not.
+logstore_since() {
+  local wm="${1:-}"
+  logstore_readall | __filter_since "$wm"
+}
+
+# logstore_watermark — echo the total-order key ("p:c:actor") of the LAST event in
+# the union, i.e. the watermark a consumer records to resume via logstore_since.
+# Empty output means "no events yet".
+logstore_watermark() {
+  logstore_readall | __watermark_of
 }
 
 # --------------------------------------------------------------------------- #

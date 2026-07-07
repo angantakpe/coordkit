@@ -4,16 +4,25 @@
 # Replicates the coordination event log over a plain git remote. The whole design
 # rests on ONE property: each actor only ever appends to its OWN segment files, so
 # two clones writing concurrently touch DISJOINT paths and can never produce a
-# structural merge conflict. `*.ndjson merge=union` (installed from
-# templates/gitattributes as .claude/coord/.gitattributes) is only a backstop for
-# the pathological case where the same actor id is reused from two clones.
+# structural merge conflict. `*.ndjson merge=union` is only a backstop for the
+# pathological case where the same actor id is reused from two clones.
+#
+# CRITICAL INVARIANT: sync NEVER touches the user's checkout, index, or branch.
+# Actors append to plain files under <coord>/log/ in the working tree (that path is
+# gitignored on the user's branch — see scripts/init-git.sh), and replication happens
+# entirely inside a PRIVATE, gitignored worktree at <coord>/.sync checked out to a
+# dedicated branch (COORDKIT_SYNC_BRANCH, default "coordkit/log") of the same remote.
+# Nothing here ever runs `git add`, commit, rebase or push against the user's branch.
 #
 # Layout under <coord>/ (coord = COORDKIT_COORD_DIR, else <repo>/.claude/coord):
-#   log/<actor>/<epoch>-NNNN.ndjson   actor-partitioned, rotated committed segments
-#   .gitattributes                    `*.ndjson merge=union` (installed from template)
-#   .coord.lock                       flock file lib holds for appends
+#   log/<actor>/<epoch>-NNNN.ndjson   actor-partitioned local segments (gitignored)
+#   .sync/                            private sync worktree on the log branch (gitignored)
+#   .gitattributes                    `*.ndjson merge=union` (committed backstop)
+#   .coord.lock                       lock file lib holds for appends
 #
-# readall = union of every committed segment, deduped (eid) + ordered (clock).
+# readall = union of every local segment under <coord>/log, deduped (eid) + ordered
+# (clock). Remote peers' segments are copied DOWN into <coord>/log by __git_sync, so
+# reads never depend on git and stay identical across every mode.
 #
 # Implements: __git_append / __git_readall / __git_tail / __git_lockfile, plus the
 # out-of-band __git_sync. Sourcing defines functions only — no git, no fs, no net.
@@ -21,6 +30,9 @@
 # Env knobs:
 #   COORDKIT_COORD_DIR     override the coord dir (default <repo>/.claude/coord)
 #   COORDKIT_GIT_SEG_MAX   lines per segment before rotating to a new one (default 1000)
+#   COORDKIT_SYNC_BRANCH   dedicated log branch to replicate on (default coordkit/log)
+#   COORDKIT_SYNC_REMOTE   remote to sync against (default: coord.toml remote, else the
+#                          repo's first configured remote, else "origin")
 
 __git_basedir() {
   printf '%s' "${COORDKIT_COORD_DIR:-$(__logstore_repo_root)/.claude/coord}"
@@ -46,7 +58,15 @@ __git_current_segment() {
   epoch="$(date +%s)"
   n=1
   if [ -n "$seg" ]; then
-    n=$(( $(basename "$seg" | sed -E 's/^[0-9]+-0*([0-9]+)\.ndjson$/\1/') + 1 ))
+    # Guard the arithmetic: only bump when the newest filename actually matches the
+    # <epoch>-NNNN.ndjson pattern. A foreign name (sed -n ...p prints nothing) leaves
+    # num empty, so we fall back to n=1 instead of erroring on non-numeric input.
+    local num
+    num="$(basename "$seg" | sed -nE 's/^[0-9]+-0*([0-9]+)\.ndjson$/\1/p')"
+    case "$num" in
+      ''|*[!0-9]*) n=1 ;;
+      *)           n=$(( num + 1 )) ;;
+    esac
   fi
   printf '%s/%s-%04d.ndjson' "$dir" "$epoch" "$n"
 }
@@ -60,7 +80,10 @@ __git_append() {
   printf '%s\n' "$line" >> "$seg"
 }
 
-# Union of every committed segment across all actors, deduped + ordered.
+# Union of every local segment across all actors, deduped + ordered. (Remote peers'
+# segments are copied into <coord>/log by __git_sync, so this local read is the full
+# union.) `awk 1` (not `cat`) so a segment lacking a trailing newline can't splice
+# its last line into the next file's first line.
 __git_readall() {
   local base seg
   base="$(__git_basedir)"
@@ -68,7 +91,7 @@ __git_readall() {
     if [ -d "$base/log" ]; then
       find "$base/log" -type f -name '*.ndjson' 2>/dev/null \
         | LC_ALL=C sort \
-        | while IFS= read -r seg; do cat -- "$seg"; done
+        | while IFS= read -r seg; do awk 1 "$seg" 2>/dev/null; done
     fi
   } | __dedup_by_eid | __total_order
 }
@@ -80,43 +103,168 @@ __git_tail() {
 }
 
 # --------------------------------------------------------------------------- #
-# __git_sync — replicate the committed log with the remote.
+# Sync configuration + the private sync worktree.
+# --------------------------------------------------------------------------- #
+
+__git_sync_branch() { printf '%s' "${COORDKIT_SYNC_BRANCH:-coordkit/log}"; }
+
+# Remote to replicate against: explicit env > coord.toml `remote` > the repo's first
+# configured remote > "origin". May be a remote NAME or a URL (git fetch/push accept
+# either).
+__git_sync_remote() {
+  local root="$1" r
+  if [ -n "${COORDKIT_SYNC_REMOTE:-}" ]; then printf '%s' "$COORDKIT_SYNC_REMOTE"; return 0; fi
+  r="$(__logstore_toml_get "$(__logstore_coordtoml)" remote 2>/dev/null)"
+  if [ -n "$r" ]; then printf '%s' "$r"; return 0; fi
+  r="$(git -C "$root" remote 2>/dev/null | head -n1)"
+  printf '%s' "${r:-origin}"
+}
+
+# Copy per-actor segments from <src> to <dst>, one file at a time, ONLY when the
+# destination is missing or the source is strictly larger (segments are single-writer
+# append-only, so "larger" == "has strictly more appended data"). Each file is written
+# to a temp sibling and atomically renamed so a concurrent reader never sees a partial
+# copy, and a locally-owned segment is never shrunk. Never deletes anything.
+__git_sync_copy() {
+  local src="$1" dst="$2" f rel out ssz dsz tmp
+  [ -d "$src" ] || return 0
+  find "$src" -type f -name '*.ndjson' 2>/dev/null | while IFS= read -r f; do
+    rel="${f#"$src"/}"
+    out="$dst/$rel"
+    if [ -f "$out" ]; then
+      ssz="$(wc -c < "$f"   2>/dev/null || echo 0)"
+      dsz="$(wc -c < "$out" 2>/dev/null || echo 0)"
+      [ "${ssz:-0}" -gt "${dsz:-0}" ] || continue
+    fi
+    mkdir -p "$(dirname "$out")" 2>/dev/null || continue
+    tmp="$out.tmp.$$"
+    if cp -f "$f" "$tmp" 2>/dev/null; then
+      mv -f "$tmp" "$out" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+    else
+      rm -f "$tmp" 2>/dev/null || true
+    fi
+  done
+  return 0
+}
+
+# Ensure the private sync worktree exists at <sync> on branch <branch>, tracking the
+# same remote, WITHOUT ever touching the user's checkout/index/branch. Recovers a
+# previous killed run by aborting any in-progress rebase THERE (safe — private branch).
+# True while the sync worktree has an in-progress (or corrupt/partial) rebase.
+__git_sync_rebasing() {
+  local sync="$1" d
+  d="$(git -C "$sync" rev-parse --git-path rebase-merge 2>/dev/null)"; [ -n "$d" ] && [ -d "$d" ] && return 0
+  d="$(git -C "$sync" rev-parse --git-path rebase-apply 2>/dev/null)"; [ -n "$d" ] && [ -d "$d" ] && return 0
+  return 1
+}
+
+__git_sync_worktree() {
+  local root="$1" sync="$2" branch="$3" remote="$4" empty_tree empty_commit
+
+  if git -C "$sync" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if __git_sync_rebasing "$sync"; then
+      # A previous run was killed mid-rebase; abort it HERE (safe — private branch).
+      git -C "$sync" rebase --abort >/dev/null 2>&1 || true
+    fi
+    # Healthy (no rebase, or it aborted cleanly)? Reuse the worktree.
+    __git_sync_rebasing "$sync" || return 0
+    # Still wedged (a corrupt/partial rebase that --abort can't clear): tear the
+    # private worktree down and recreate it fresh from the remote below.
+    git -C "$root" worktree remove --force "$sync" >/dev/null 2>&1 || true
+  fi
+
+  # Clear any stale/partial dir at our own path, and prune its dangling admin entry.
+  [ -e "$sync" ] && { rm -rf "$sync" 2>/dev/null || return 1; }
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+  mkdir -p "$(dirname "$sync")" 2>/dev/null || return 1
+
+  if git -C "$root" fetch --quiet "$remote" "+refs/heads/${branch}:refs/coordkit/sync-fetch" 2>/dev/null; then
+    # Remote branch exists → check it out (as local <branch>) in the private worktree.
+    git -C "$root" worktree add --quiet -B "$branch" "$sync" refs/coordkit/sync-fetch 2>/dev/null || return 1
+  else
+    # Remote branch absent → create an ORPHAN branch on an empty root commit, without
+    # materialising the user's tree into the worktree.
+    empty_tree="$(git -C "$root" hash-object -w -t tree /dev/null 2>/dev/null)" || return 1
+    empty_commit="$(git -C "$root" commit-tree -m 'coordkit: coordination log' "$empty_tree" 2>/dev/null </dev/null)" || return 1
+    git -C "$root" update-ref "refs/heads/${branch}" "$empty_commit" 2>/dev/null || return 1
+    git -C "$root" worktree add --quiet "$sync" "$branch" 2>/dev/null || return 1
+  fi
+  return 0
+}
+
+# --------------------------------------------------------------------------- #
+# __git_sync — replicate the coordination log with the remote via the PRIVATE
+# worktree. Never mutates the user's checkout, index, or branch.
 #
 # !!! NEVER call this inline from a Claude hook. !!!
-# It does network git (pull --rebase + push) and can be slow or block; running it
-# in a PostToolUse/PreToolUse hook would put the network on the critical path of
-# every tool call. It is meant to be driven by a DEBOUNCED, out-of-hook timer ONLY
-# (see bin/sync.sh — cron / systemd timer / a background `loop`). A `flock -n`
-# guard makes overlapping ticks no-ops instead of piling up.
+# It does network git (fetch + push) and can be slow or block; running it in a
+# PostToolUse/PreToolUse hook would put the network on the critical path of every
+# tool call. Drive it from a DEBOUNCED, out-of-hook timer ONLY (see bin/sync.sh —
+# cron / systemd timer / a background `loop`). A `flock -n` guard makes overlapping
+# ticks no-ops instead of piling up.
 #
-# Steps: stage+commit pending segments → pull --rebase --autostash → push.
-# Conflict-free by construction (disjoint per-actor files); merge=union backstops.
-# Returns non-zero (without throwing) on any git failure so the caller can log it.
+# Steps (all against the dedicated log branch inside <coord>/.sync):
+#   1. copy grown local segments  <coord>/log     → <coord>/.sync/log
+#   2. commit them on the private branch (worktree's own index — not the user's)
+#   3. fetch + rebase onto the remote log branch  (safe: the branch is private)
+#   4. push the private branch (creating it on the first sync)
+#   5. copy peers' segments back  <coord>/.sync/log → <coord>/log  (so readall sees them)
+#
+# Conflict-free by construction (disjoint per-actor files); merge=union backstops the
+# same-actor-id-from-two-clones case. Returns non-zero (without throwing) on any git
+# failure so the caller can log it.
 # --------------------------------------------------------------------------- #
 __git_sync() {
-  local coord root lock
+  local coord root lock branch remote sync
   coord="$(__git_basedir)"
   root="$(git -C "$coord" rev-parse --show-toplevel 2>/dev/null)" || {
     printf 'coordkit[git]: %s is not inside a git repo; nothing to sync\n' "$coord" >&2
     return 1
   }
+  branch="$(__git_sync_branch)"
+  remote="$(__git_sync_remote "$root")"
+  sync="$coord/.sync"
   lock="$(__git_lockfile).sync"
   mkdir -p "$(dirname "$lock")" 2>/dev/null || true
   (
     flock -n 9 || { printf 'coordkit[git]: a sync is already running; skipping\n' >&2; exit 0; }
 
-    git -C "$root" add -- "$coord/log" >/dev/null 2>&1 || true
-    if ! git -C "$root" diff --cached --quiet -- "$coord/log" 2>/dev/null; then
-      git -C "$root" commit -q -m "coordkit: sync coordination log" -- "$coord/log" 2>/dev/null || true
+    __git_sync_worktree "$root" "$sync" "$branch" "$remote" || {
+      printf 'coordkit[git]: could not prepare private sync worktree at %s\n' "$sync" >&2
+      exit 1
+    }
+
+    # merge=union backstop, active on the private branch where rebases happen; plus a
+    # .gitignore so a transient copy temp file (*.tmp.PID) can never be committed.
+    [ -f "$sync/.gitattributes" ] || printf '*.ndjson merge=union\n' > "$sync/.gitattributes" 2>/dev/null || true
+    [ -f "$sync/.gitignore" ]     || printf '*.tmp.*\n'            > "$sync/.gitignore"     2>/dev/null || true
+
+    # 1) copy grown local segments up into the private worktree.
+    __git_sync_copy "$coord/log" "$sync/log"
+
+    # 2) commit on the private branch — the worktree has its OWN index, so this never
+    #    stages anything in the user's index or on the user's branch.
+    git -C "$sync" add -A -- . >/dev/null 2>&1 || true
+    if ! git -C "$sync" diff --cached --quiet 2>/dev/null; then
+      git -C "$sync" commit -q -m "coordkit: sync coordination log" 2>/dev/null || true
     fi
 
-    if ! git -C "$root" pull --rebase --autostash -q 2>/dev/null; then
-      printf 'coordkit[git]: pull --rebase failed (left local commits intact)\n' >&2
+    # 3) fetch the remote log branch (if any) and rebase our commits on top of it.
+    if git -C "$sync" fetch --quiet "$remote" "refs/heads/${branch}" 2>/dev/null; then
+      if ! git -C "$sync" rebase --quiet FETCH_HEAD 2>/dev/null; then
+        git -C "$sync" rebase --abort >/dev/null 2>&1 || true
+        printf 'coordkit[git]: rebase onto %s/%s failed (left private branch intact)\n' "$remote" "$branch" >&2
+        exit 1
+      fi
+    fi
+
+    # 4) push the private branch (creates it on the remote on the first sync).
+    if ! git -C "$sync" push --quiet "$remote" "HEAD:refs/heads/${branch}" 2>/dev/null; then
+      printf 'coordkit[git]: push to %s/%s failed (will retry on next tick)\n' "$remote" "$branch" >&2
       exit 1
     fi
-    if ! git -C "$root" push -q 2>/dev/null; then
-      printf 'coordkit[git]: push failed (will retry on next tick)\n' >&2
-      exit 1
-    fi
+
+    # 5) copy peers' segments back down so local readall reflects the whole union.
+    __git_sync_copy "$sync/log" "$coord/log"
   ) 9>"$lock"
 }

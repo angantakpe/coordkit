@@ -39,7 +39,9 @@ __local_append() {
 
 # Union of all per-actor segments + the legacy flat ledger, deduped + ordered.
 # File list is LC_ALL=C-sorted so input order is deterministic (which makes the
-# stable sort's tie-breaking deterministic too).
+# stable sort's tie-breaking deterministic too). `awk 1` (not `cat`) concatenates
+# so that a segment whose last line lacks a trailing newline can't splice into the
+# first line of the next file — awk always terminates every record with a newline.
 __local_readall() {
   local base seg
   base="$(__local_basedir)"
@@ -47,10 +49,10 @@ __local_readall() {
     if [ -d "$base/log" ]; then
       find "$base/log" -type f -name '*.ndjson' 2>/dev/null \
         | LC_ALL=C sort \
-        | while IFS= read -r seg; do cat -- "$seg"; done
+        | while IFS= read -r seg; do awk 1 "$seg" 2>/dev/null; done
     fi
     # Legacy flat ledger, folded in last for backward-compat.
-    [ -f "$base/ledger.jsonl" ] && cat -- "$base/ledger.jsonl"
+    [ -f "$base/ledger.jsonl" ] && awk 1 "$base/ledger.jsonl" 2>/dev/null
   } | __dedup_by_eid | __total_order
 }
 

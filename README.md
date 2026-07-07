@@ -29,9 +29,10 @@ own axis:
 1. **Distribution / packaging** *(this README, the marketplace, plugin manifests,
    hook wiring)* — how the system is installed, versioned, and updated. The
    coordkit `version` (currently `2.0.0`) is the tooling-version axis.
-2. **Schema** *(`plugins/coordkit/schema/`)* — the versioned event envelope (v2)
-   plus its JSON Schema, manifest, and migrations. This is the on-disk format
-   axis, versioned independently of the tooling.
+2. **Schema** *(`plugins/coordkit/schema/`)* — the versioned event envelope
+   plus its JSON Schema, manifest, and migrations. The envelope version is
+   configurable and the ledger accepts either version on read; this is the
+   on-disk format axis, versioned independently of the tooling.
 3. **Transport** *(`plugins/coordkit/transports/`)* — how events move: `local`
    (the per-repo `.claude-bus/` directory), and optional `git` / `relay`
    backends behind a common `lib.sh`. This is the delivery axis.
@@ -67,7 +68,7 @@ Updates ship by bumping the plugin `version`; users pull them with
 
 ## What gets wired
 
-**coordkit** registers six lifecycle hooks (all invoked via
+**coordkit** registers five lifecycle hooks (all invoked via
 `${CLAUDE_PLUGIN_ROOT}` so the install location doesn't matter):
 
 | Event | Matcher | Invocation |
@@ -76,8 +77,7 @@ Updates ship by bumping the plugin `version`; users pull them with
 | `UserPromptSubmit` | — | `claude-bus.sh task`, `claude-ledger.sh prompt` |
 | `PreToolUse` | `Write\|Edit` | `claude-bus.sh check` |
 | `PostToolUse` | `Write\|Edit\|Read\|Bash` | `claude-bus.sh record` |
-| `Stop` | — | `claude-bus.sh stop` |
-| `SessionEnd` | — | `claude-bus.sh stop` |
+| `SessionEnd` | — | `claude-bus.sh stop` (end-of-session cleanup) |
 
 **coordguard** registers the blocker (and the companion record phase it needs to
 avoid blocking on files this session legitimately read):

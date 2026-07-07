@@ -56,17 +56,6 @@
         ]
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "stop"]
-          }
-        ]
-      }
-    ],
     "SessionEnd": [
       {
         "hooks": [

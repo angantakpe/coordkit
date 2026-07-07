@@ -11,7 +11,7 @@
       "name": "coordkit",
       "source": "./plugins/coordkit",
       "description": "Same-machine coordination bus + cross-instance ledger. WARN-only: tracks who else is live in a repo and which files they touch, and surfaces it — never blocks a tool call.",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"
@@ -30,7 +30,7 @@
       "name": "coordguard",
       "source": "./plugins/coordguard",
       "description": "Hard anti-clobber guard. Blocks a Write/Edit when a file changed on disk since this session last saw it (a sibling Claude instance likely edited it). Kept separate from coordkit so the bus stays strictly never-blocks.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"

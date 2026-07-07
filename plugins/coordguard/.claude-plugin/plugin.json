@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "coordguard",
   "displayName": "coordguard",
-  "version": "1.0.0",
-  "description": "Hard anti-clobber guard for multi-instance Claude Code. On Write/Edit it blocks (PreToolUse deny) when the target file changed on disk since this session last read it — the signature of another Claude instance editing the same file. Kept separate from coordkit so the bus stays strictly never-blocks.",
+  "version": "1.1.0",
+  "description": "Hard anti-clobber guard for multi-instance Claude Code. On Write/Edit it blocks (PreToolUse deny) when the target file changed on disk since this session last read it — the signature of another Claude instance editing the same file. Kept separate from coordkit so the bus stays strictly never-blocks. Caveat: a file this session modifies via the Bash tool (sed -i, formatters, git checkout) also trips the guard, since a hook can't tell which files a shell command touched — just re-Read it to proceed.",
   "author": {
     "name": "codehornets",
     "email": "codehornets@gmail.com"

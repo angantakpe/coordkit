@@ -1,3 +1,7 @@
-# nothing runtime here — coordkit emits state into a repo's .claude-bus / .claude/coord, never into the marketplace
+# coordkit emits runtime state into a repo's .claude-bus / .claude/coord, never
+# into the packaged marketplace. This repo also dogfoods coordkit, so its own
+# live .claude-bus/ shows up here — ignore it explicitly rather than relying on
+# the runtime-generated .claude-bus/.gitignore that coordkit drops at runtime.
+/.claude-bus/
 .DS_Store
 *.swp

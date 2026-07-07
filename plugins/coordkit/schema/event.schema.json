@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://coordkit/schema/event/2.0",
   "title": "coordkit event envelope v2",
-  "description": "One append-only JSON event per line in the coordination log. v1 events (no schema_version) are read tolerantly as 1.0 and up-converted on read by migrations/0001_v1_to_v2.sh — stored lines are NEVER rewritten.",
+  "description": "One append-only JSON event per line in the coordination log. v1 events (no schema_version) are read tolerantly as 1.0: readers pass them through VERBATIM and treat any absent v2 field as its default — no on-read rewrite happens. (schema/migrations/0001_v1_to_v2.sh is an OPTIONAL offline/manual up-converter and is NOT invoked on the read path.) Stored lines are NEVER rewritten.",
   "type": "object",
   "additionalProperties": true,
   "required": ["schema_version", "eid", "id", "actor", "clock", "type", "subject"],
@@ -43,8 +43,11 @@
     "branch": { "type": "string", "description": "Git branch at write time (or \"no-git\")." },
     "type": {
       "type": "string",
-      "description": "Event type. Readers MUST tolerate unknown types as opaque notes.",
-      "enum": ["note", "decision", "question", "answer", "task", "claim", "done", "block"]
+      "description": "Event type. KNOWN types: note, decision, question, answer, task, claim, done, block. This list is DOCUMENTATION, not a closed set — readers MUST tolerate unknown types as opaque notes, so validation accepts any string. Producers SHOULD stick to the known types.",
+      "anyOf": [
+        { "enum": ["note", "decision", "question", "answer", "task", "claim", "done", "block"] },
+        { "type": "string" }
+      ]
     },
     "subject": { "type": "string", "description": "Reconciliation key: the latest non-superseded event per subject wins." },
     "body":    { "type": "string", "description": "Free-text payload. A task body may carry 'dep:<subject>' tokens for ordering." },

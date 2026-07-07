@@ -55,18 +55,38 @@ __relay_room() {
 
 # Best-effort fan-out POST. STUB: fire-and-forget, never fatal, never blocks long.
 # Always returns 0 — POST failure must not affect durability (already persisted).
+#
+# Two safety details:
+#   * The event line is streamed on curl's STDIN via `--data-binary @-`, so a leading
+#     '@' (or '<') in the payload is treated as data, NOT as a read-this-file directive
+#     (the old `--data-binary "$line"` allowed local-file exfiltration).
+#   * The bearer token is passed through a 0600 temp file read via `-H @file`, so it
+#     never appears in argv (/proc/<pid>/cmdline) where any local process could read it.
+# Headers are assembled in an array so a room id (or any value) with spaces can't be
+# word-split into broken arguments.
 __relay_post() {
-  local line="$1" url room
+  local line="$1" url room tokfile
   url="$(__relay_url)"
   [ -n "$url" ] || return 0          # no relay configured → pure local/git behaviour
   command -v curl >/dev/null 2>&1 || return 0
   room="$(__relay_room)"
-  curl -fsS --max-time 2 \
-    -H 'Content-Type: application/x-ndjson' \
-    ${room:+-H "X-Coord-Room: $room"} \
-    ${COORDKIT_RELAY_TOKEN:+-H "Authorization: Bearer $COORDKIT_RELAY_TOKEN"} \
-    --data-binary "$line"$'\n' \
-    "$url" >/dev/null 2>&1 || true   # cache miss is acceptable; never propagate failure
+
+  local -a args=( -fsS --max-time 2 -H 'Content-Type: application/x-ndjson' )
+  [ -n "$room" ] && args+=( -H "X-Coord-Room: $room" )
+
+  tokfile=""
+  if [ -n "${COORDKIT_RELAY_TOKEN:-}" ]; then
+    tokfile="$(mktemp 2>/dev/null)" || tokfile=""
+    if [ -n "$tokfile" ]; then
+      chmod 600 "$tokfile" 2>/dev/null || true
+      printf 'Authorization: Bearer %s\n' "$COORDKIT_RELAY_TOKEN" > "$tokfile"
+      args+=( -H "@$tokfile" )
+    fi
+  fi
+  args+=( --data-binary @- --url "$url" )
+
+  printf '%s\n' "$line" | curl "${args[@]}" >/dev/null 2>&1 || true   # cache miss is acceptable
+  [ -n "$tokfile" ] && rm -f "$tokfile" 2>/dev/null
   return 0
 }
 

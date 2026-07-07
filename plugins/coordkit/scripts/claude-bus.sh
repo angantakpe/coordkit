@@ -14,13 +14,19 @@
 #   TASKS.md            shared task board (claim/done)
 #   activity.log        feed: "<iso>\t<sid8>\t<verb>\t<detail>"
 #
-# Wired from settings.json:
+# Wired via the plugin's hooks/hooks.json (each hook runs
+# `bash ${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh <phase>`):
 #   SessionStart            -> start    register + greet (who's live, same-branch ⚠, messages)
 #   UserPromptSubmit        -> task     record current task + deliver inbox messages
 #   PostToolUse Write|Edit|Read|Bash -> record  feed + heartbeat + claims
 #   PreToolUse  Write|Edit   -> check   soft collision warning + desktop notify
-#   Stop / SessionEnd        -> stop    drop heartbeat + release claims
-#   statusLine               -> badge   "🛰️ N live" + heartbeat tick (via cship-bus.sh)
+#   SessionEnd               -> stop    drop heartbeat + release claims
+#
+# The `badge` statusline phase is NOT wired by the plugin manifest — a plugin
+# manifest can't register a statusLine command, so the user must wire it in
+# their settings.json by hand, e.g.:
+#   "statusLine": {"type":"command","command":"bash <path>/claude-bus.sh badge"}
+# It prints "🛰️ N live" and doubles as a throttled heartbeat tick.
 #
 # By hand:
 #   claude-bus.sh dashboard [repo]   one-shot snapshot (used by /bus)
@@ -60,7 +66,16 @@ resolve_root() {
   if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return; fi
   printf '%s' "$cwd"
 }
-branch_of() { git -C "$1" branch --show-current 2>/dev/null || printf 'no-git'; }
+# Prints the branch name, or a sentinel that never matches a real branch:
+#   no-git    -> not a git work tree (git command failed)
+#   detached  -> detached HEAD (git prints empty on exit 0)
+# Same-branch collision checks must treat both sentinels (and empty) as
+# never-matching, otherwise two detached-HEAD instances look like a collision.
+branch_of() {
+  local b
+  b="$(git -C "$1" branch --show-current 2>/dev/null)" || { printf 'no-git'; return; }
+  if [ -n "$b" ]; then printf '%s' "$b"; else printf 'detached'; fi
+}
 
 # ── input handling ──────────────────────────────────────────────────────────
 # dashboard/watch take a repo arg; everything else reads hook/statusline JSON.
@@ -96,6 +111,7 @@ prune_dead() {
     last="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$last" ] && last=0
     [ $(( t - last )) -gt "$STALE_HARD" ] && rm -f "$f" 2>/dev/null
   done
+  return 0   # never let the loop's last test short-circuit `... && heartbeat`
 }
 
 heartbeat() {  # $1=task (or "") $2=file-to-append (or "")
@@ -161,8 +177,21 @@ drain_inbox() {  # prints message lines for $sid and deletes them; returns 0 if 
 
 notify() {  # best-effort desktop notification; never fails
   local title="$1" body="$2"
+  # notify-send takes title/body as separate argv, so it needs no escaping.
   command -v notify-send >/dev/null 2>&1 && { notify-send -u normal "$title" "$body" >/dev/null 2>&1 & disown 2>/dev/null; return; }
-  command -v powershell.exe >/dev/null 2>&1 && { powershell.exe -NoProfile -Command "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); [System.Windows.Forms.MessageBox]::Show('$body','$title')" >/dev/null 2>&1 & disown 2>/dev/null; }
+  if command -v powershell.exe >/dev/null 2>&1; then
+    # title/body are attacker-influenced (filenames, another session's branch
+    # field) and get inlined into PowerShell single-quoted string literals, so
+    # sanitize for THAT context: strip control chars/newlines (which would break
+    # out of the -Command string) and double embedded single quotes ('->'')
+    # which is the only metacharacter inside a PS single-quoted literal. An env
+    # var can't carry these safely — WSL vars don't reach powershell.exe without
+    # WSLENV — so inline escaping is the reliable path.
+    local pt pb
+    pt="$(printf '%s' "$title" | tr -d '\000-\037' | sed "s/'/''/g")"
+    pb="$(printf '%s' "$body"  | tr -d '\000-\037' | sed "s/'/''/g")"
+    powershell.exe -NoProfile -Command "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); [System.Windows.Forms.MessageBox]::Show('$pb','$pt')" >/dev/null 2>&1 & disown 2>/dev/null
+  fi
 }
 
 case "$phase" in
@@ -174,7 +203,7 @@ case "$phase" in
     samebr=""
     if [ -n "$rows" ]; then
       while IFS=$'\t' read -r id st age br task files; do
-        [ "$br" = "$curbr" ] && [ "$br" != "no-git" ] && samebr+="${id} "
+        [ "$br" = "$curbr" ] && [ "$br" != "no-git" ] && [ "$br" != "detached" ] && [ -n "$br" ] && samebr+="${id} "
       done <<< "$rows"
     fi
     ctx=""
@@ -264,7 +293,10 @@ case "$phase" in
     exit 0
     ;;
 
-  # ── Stop / SessionEnd ─────────────────────────────────────────────────────
+  # ── SessionEnd ────────────────────────────────────────────────────────────
+  # Wired to SessionEnd only (NOT Stop): Stop fires at the end of every
+  # assistant turn, which would drop the heartbeat + release claims mid-session
+  # and make the instance invisible to /bus for most of its life.
   stop)
     rm -f "${agents}/${sid}.json" 2>/dev/null
     for cf in "$claims"/*.json; do
@@ -284,18 +316,36 @@ case "$phase" in
       [ $(( $(now) - l )) -lt "$TICK_MIN" ] && do_tick=0
     fi
     [ "$do_tick" -eq 1 ] && heartbeat "" ""
-    t="$(now)"; live=0; samebr=0
-    for f in "$agents"/*.json; do
-      [ -e "$f" ] || continue
-      l="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$l" ] && l=0
-      [ $(( t - l )) -gt "$STALE_HARD" ] && continue
-      live=$(( live + 1 ))
-      s="$(jq -r '.sid // ""' "$f" 2>/dev/null)"
-      br="$(jq -r '.branch // ""' "$f" 2>/dev/null)"
-      [ "$s" != "$sid" ] && [ "$br" = "$curbr" ] && [ "$br" != "no-git" ] && samebr=$(( samebr + 1 ))
-    done
-    [ "$live" -le 1 ] && exit 0   # alone: keep the statusline clean
-    out="🛰️ ${live} live"
+    # Count DISTINCT sessions (by 8-char sid — the identity the rest of the bus
+    # displays) so duplicate or stub registrations for one session can't inflate
+    # the badge. Each session is classified by its FRESHEST heartbeat.
+    t="$(now)"
+    counts="$(
+      for f in "$agents"/*.json; do
+        [ -e "$f" ] || continue
+        s="$(jq -r '.sid // ""' "$f" 2>/dev/null)"; [ -z "$s" ] && continue
+        l="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$l" ] && l=0
+        b="$(jq -r '.branch // ""' "$f" 2>/dev/null)"
+        printf '%s\t%s\t%s\n' "${s:0:8}" "$(( t - l ))" "$b"
+      done | awk -F'\t' -v me="${sid:0:8}" -v soft="$STALE_SOFT" -v hard="$STALE_HARD" -v cur="$curbr" '
+        { id=$1; age=$2+0; br=$3
+          if (age>hard) next
+          if (!(id in a) || age<a[id]) { a[id]=age; bof[id]=br } }   # freshest heartbeat per session
+        END {
+          live=0; idle=0; samebr=0
+          for (id in a) {
+            if (a[id]<=soft) { live++; if (id!=me && bof[id]==cur && cur!="no-git" && cur!="detached" && cur!="") samebr++ }
+            else idle++
+          }
+          printf "%d %d %d", live, idle, samebr
+        }'
+    )"
+    live="${counts%% *}"; rest="${counts#* }"; idle="${rest%% *}"; samebr="${rest##* }"
+    : "${live:=0}" "${idle:=0}" "${samebr:=0}"
+    # alone: only me live and nobody idling -> keep the statusline clean
+    [ "$live" -le 1 ] && [ "$idle" -eq 0 ] && exit 0
+    if [ "$live" -ge 2 ]; then out="🛰️ ${live} live"; else out="🛰️"; fi
+    if [ "$idle" -gt 0 ]; then out="${out} · ${idle} idle"; fi
     if [ "$samebr" -gt 0 ]; then out="${out} \033[31m· ⚠ ${samebr} on this branch\033[0m"; fi
     printf '%b' "$out"
     exit 0
@@ -312,9 +362,19 @@ case "$phase" in
   done)
     shift; pat="$*"; [ -z "$pat" ] && { echo "usage: claude-bus.sh done \"<text to match>\""; exit 0; }
     [ -f "$tasks_md" ] || { echo "no task board yet"; exit 0; }
-    esc="$(printf '%s' "$pat" | sed 's/[&/\]/\\&/g')"
-    ( flock 9; sed -i "/$esc/s/^- \[ \]/- [x]/" "$tasks_md" ) 9>"${bus}/.tasks.lock" 2>/dev/null
-    echo "✅ marked done (matching: $pat)"
+    # Match the task text LITERALLY (grep -nF), not as a regex — a user task
+    # containing . * [ ] ^ $ would otherwise over-match or break sed. Restrict
+    # to still-open lines, take the first, and check off exactly that line.
+    (
+      flock 9
+      lineno="$(grep -nF -- "$pat" "$tasks_md" 2>/dev/null | grep -E '^[0-9]+:- \[ \]' | head -n1 | cut -d: -f1)"
+      if [ -n "$lineno" ]; then
+        sed -i "${lineno}s/^- \[ \]/- [x]/" "$tasks_md"
+        echo "✅ marked done (matching: $pat)"
+      else
+        echo "no open task matching: $pat"
+      fi
+    ) 9>"${bus}/.tasks.lock" 2>/dev/null
     exit 0
     ;;
   tasks)
@@ -323,6 +383,11 @@ case "$phase" in
     ;;
 
   # ── messaging ─────────────────────────────────────────────────────────────
+  # Limitation: messages sent from the CLI run under sid "cli" (see input
+  # handling above), not a real session id. A `msg all` therefore also drops a
+  # copy into any live session — including, if the sender happens to be a live
+  # session too, potentially its own inbox. Target a specific sid8 or branch to
+  # avoid echoing back to yourself.
   msg)
     shift; target="${1:-}"; shift || true; text="$*"
     { [ -z "$target" ] || [ -z "$text" ]; } && { echo "usage: claude-bus.sh msg <all|sid8|branch:name> <text>"; exit 0; }
@@ -345,7 +410,12 @@ case "$phase" in
       esac
       if [ "$hit" -eq 1 ]; then
         mkdir -p "${inbox}/${s}" 2>/dev/null
-        printf '%s\n' "$stamp" > "${inbox}/${s}/$(now)-$$.msg" 2>/dev/null
+        # Uniquify: ts-pid alone can collide within the same second/PID and
+        # silently overwrite an undelivered message. Add a random suffix and
+        # loop past any name that somehow already exists.
+        mf="${inbox}/${s}/$(now)-$$-${RANDOM}.msg"
+        while [ -e "$mf" ]; do mf="${inbox}/${s}/$(now)-$$-${RANDOM}${RANDOM}.msg"; done
+        printf '%s\n' "$stamp" > "$mf" 2>/dev/null
         delivered=$(( delivered + 1 ))
       fi
     done

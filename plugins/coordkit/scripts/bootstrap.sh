@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# bootstrap.sh — run once per session (SessionStart, before the bus/ledger hooks
-# or by them). Ensures a STABLE per-(machine+user+clone) actor/site identity
-# exists in the persistent plugin data dir. No-op if already set. NEVER blocks:
-# always exits 0 so it can't wedge a session.
+# bootstrap.sh — OPTIONAL / MANUAL helper (kept for CLI use, e.g. `coordkit
+# bootstrap`). It is NOT wired into any hook: the ledger is self-bootstrapping —
+# claude-ledger.sh's ensure_site() performs this same idempotent work on its init
+# path, so a stable actor id is materialized on first ledger touch. Run this by
+# hand only if you want to seed the site identity ahead of any ledger activity.
+# Ensures a STABLE per-(machine+user+clone) actor/site identity exists in the
+# persistent plugin data dir. No-op if already set. NEVER blocks: always exits 0.
 set -uo pipefail
 
 DATA="${COORDKIT_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/coordkit-data}}"

@@ -32,10 +32,12 @@ remote = ""
 # git/local mode. The relay token is supplied out-of-band via COORDKIT_RELAY_TOKEN.
 relay_url = ""
 
-# Wire/protocol version of the event line shape. Bump when the schema changes so
+# Wire/protocol version of the event envelope. Kept in lock-step with
+# schema/MANIFEST.json's `protocol` (both "2.0"). Bump when the schema changes so
 # readers can refuse or adapt to lines they don't understand.
-proto = "1"
+proto = "2.0"
 
-# Minimum reader version required to safely interpret this room's events. A clone
-# older than this should warn rather than silently mis-read newer events.
-min_reader = "2.0.0"
+# Minimum reader version required to safely interpret this room's events. Kept in
+# lock-step with schema/MANIFEST.json's `min_reader` (both "2.0"). A clone older
+# than this should warn rather than silently mis-read newer events.
+min_reader = "2.0"
