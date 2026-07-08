@@ -3,6 +3,16 @@
 All notable changes to **skillkit** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.0.1
+
+### Fixed
+- **`agents/README.md` was loading as a phantom agent.** The plugin loader
+  treats every `.md` file in `agents/` as an agent definition; the
+  documentation README had no frontmatter, so it surfaced as a selectable
+  agent named "README" with empty metadata (confirmed via
+  `claude plugin details skillkit@coordkit-marketplace`). Removed — agent
+  documentation lives in the plugin's top-level `README.md` instead.
+
 ## 1.0.0
 
 Initial release — the claude-code-infrastructure-showcase auto-activation
