@@ -5,6 +5,24 @@ All notable changes to **coordkit** are documented here. This project follows
 `.claude-plugin/plugin.json` is the canonical tooling-version axis — bump it to
 ship an update to installed users.
 
+## 2.1.1
+
+Bugfix release: two disk-hygiene leaks in the coordination bus.
+
+### Fixed
+- **Empty inbox subdirs no longer accumulate.** `drain_inbox()` deleted each
+  `.msg` file but left the `inbox/<sid>/` directory behind, so a long-lived bus
+  grew one stub dir per session forever. It now `rmdir`s the drained dir (a
+  no-op if still non-empty or already gone), and `stop` (SessionEnd) does the
+  same for the exiting session's own inbox dir.
+- **Stale claims from crashed sessions are now pruned.** `stop` only releases
+  claims owned by the exiting sid and never runs on a crash/kill, so a dead
+  session's soft locks lingered on disk indefinitely — `check` silently ignored
+  them but never cleaned them up. `prune_dead` (run at SessionStart) now also
+  deletes any `claims/<key>.json` whose owning sid has no live agent record
+  (including owner-less/corrupt claims), reusing the existing `agent_live`
+  staleness helper.
+
 ## 2.1.0
 
 Hardening release: fixes every finding from a full-codebase review (5 parallel

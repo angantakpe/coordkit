@@ -105,11 +105,20 @@ ensure_dirs() {
 }
 
 prune_dead() {
-  local t f last; t="$(now)"
+  local t f last cf owner; t="$(now)"
   for f in "$agents"/*.json; do
     [ -e "$f" ] || continue
     last="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$last" ] && last=0
     [ $(( t - last )) -gt "$STALE_HARD" ] && rm -f "$f" 2>/dev/null
+  done
+  # Also drop claims whose owning session has no live agent record. `stop`
+  # releases a session's claims, but a crashed/killed session never runs it,
+  # so its soft locks would otherwise linger forever. Runs AFTER the agents
+  # loop above so agent_live sees hard-stale records already pruned.
+  for cf in "$claims"/*.json; do
+    [ -e "$cf" ] || continue
+    owner="$(jq -r '.sid // ""' "$cf" 2>/dev/null)"
+    { [ -z "$owner" ] || ! agent_live "$owner"; } && rm -f "$cf" 2>/dev/null
   done
   return 0   # never let the loop's last test short-circuit `... && heartbeat`
 }
@@ -172,6 +181,9 @@ drain_inbox() {  # prints message lines for $sid and deletes them; returns 0 if 
     [ -e "$f" ] || continue
     out+="  📨 $(cat "$f" 2>/dev/null)"$'\n'; rm -f "$f" 2>/dev/null; got=0
   done
+  # drop the now-empty per-sid dir so long-lived buses don't accumulate one
+  # stub directory per session forever; rmdir no-ops if non-empty or gone.
+  rmdir "$box" 2>/dev/null
   printf '%s' "$out"; return $got
 }
 
@@ -303,6 +315,9 @@ case "$phase" in
       [ -e "$cf" ] || continue
       [ "$(jq -r '.sid // ""' "$cf" 2>/dev/null)" = "$sid" ] && rm -f "$cf" 2>/dev/null
     done
+    # drop our own inbox dir if drained; rmdir no-ops if it still holds
+    # undelivered messages (leaving them for a possible late reader).
+    rmdir "${inbox}/${sid}" 2>/dev/null
     exit 0
     ;;
 

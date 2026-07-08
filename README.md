@@ -8,8 +8,8 @@ It ships **two plugins**, deliberately kept separate:
 
 | Plugin | Version | Contract | What it does |
 | --- | --- | --- | --- |
-| **coordkit** | 2.0.0 | **WARN-only — never blocks** | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other. |
-| **coordguard** | 1.0.0 | **HARD blocker** | An anti-clobber guard. On `Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it. |
+| **coordkit** | 2.1.1 | **WARN-only — never blocks** | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other. |
+| **coordguard** | 1.1.0 | **HARD blocker** | An anti-clobber guard. On `Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it. |
 
 ## Why two plugins (the split rationale)
 
@@ -28,7 +28,7 @@ own axis:
 
 1. **Distribution / packaging** *(this README, the marketplace, plugin manifests,
    hook wiring)* — how the system is installed, versioned, and updated. The
-   coordkit `version` (currently `2.0.0`) is the tooling-version axis.
+   coordkit `version` (currently `2.1.1`) is the tooling-version axis.
 2. **Schema** *(`plugins/coordkit/schema/`)* — the versioned event envelope
    plus its JSON Schema, manifest, and migrations. The envelope version is
    configurable and the ledger accepts either version on read; this is the
@@ -86,6 +86,7 @@ avoid blocking on files this session legitimately read):
 | --- | --- | --- |
 | `PreToolUse` | `Write\|Edit` | `concurrency-guard.sh check` (can return a `deny`) |
 | `PostToolUse` | `Read\|Write\|Edit` | `concurrency-guard.sh record` |
+| `SessionEnd` | — | `concurrency-guard.sh cleanup` (end-of-session cleanup) |
 
 ## Runtime behavior — verified
 

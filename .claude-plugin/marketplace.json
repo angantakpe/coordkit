@@ -11,7 +11,7 @@
       "name": "coordkit",
       "source": "./plugins/coordkit",
       "description": "Same-machine coordination bus + cross-instance ledger. WARN-only: tracks who else is live in a repo and which files they touch, and surfaces it — never blocks a tool call.",
-      "version": "2.1.0",
+      "version": "2.1.1",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"
