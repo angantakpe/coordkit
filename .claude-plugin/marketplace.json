@@ -29,8 +29,8 @@
     {
       "name": "coordguard",
       "source": "./plugins/coordguard",
-      "description": "Hard anti-clobber guard. Blocks a Write/Edit when a file changed on disk since this session last saw it (a sibling Claude instance likely edited it). Kept separate from coordkit so the bus stays strictly never-blocks.",
-      "version": "1.1.0",
+      "description": "Hard anti-clobber guard. Blocks a Write/Edit when a file changed on disk since this session last saw it (a sibling Claude instance likely edited it). Bash calls are fingerprint-bracketed so this session's own shell edits (sed -i, formatters) don't false-positive. Kept separate from coordkit so the bus stays strictly never-blocks.",
+      "version": "1.2.0",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"

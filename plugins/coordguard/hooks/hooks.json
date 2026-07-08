@@ -11,6 +11,16 @@
             "statusMessage": "Checking for concurrent edits..."
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "snapshot"]
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -21,6 +31,16 @@
             "type": "command",
             "command": "bash",
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "record"]
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "absorb"]
           }
         ]
       }

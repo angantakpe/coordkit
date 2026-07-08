@@ -85,8 +85,19 @@ avoid blocking on files this session legitimately read):
 | Event | Matcher | Invocation |
 | --- | --- | --- |
 | `PreToolUse` | `Write\|Edit` | `concurrency-guard.sh check` (can return a `deny`) |
+| `PreToolUse` | `Bash` | `concurrency-guard.sh snapshot` (fingerprint tracked files) |
 | `PostToolUse` | `Read\|Write\|Edit` | `concurrency-guard.sh record` |
+| `PostToolUse` | `Bash` | `concurrency-guard.sh absorb` (re-stamp self-inflicted changes) |
 | `SessionEnd` | — | `concurrency-guard.sh cleanup` (end-of-session cleanup) |
+
+The `snapshot`/`absorb` pair brackets every Bash call so files modified by this
+session's **own** shell commands (`sed -i`, formatters, `git checkout`) don't
+trip a false-positive deny on the next Write/Edit: a tracked file that was clean
+when the command started and changed while it ran is re-stamped as ours. A file
+that was already stale before the Bash call (a sibling edited it earlier) is
+deliberately not absorbed and still denies. Files the session never Read —
+including files its Bash commands *create* — remain untracked: Read once to
+adopt them.
 
 ## Runtime behavior — verified
 
