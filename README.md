@@ -4,12 +4,13 @@ A Claude Code plugin marketplace that packages a working **same-machine,
 multi-instance coordination system** so it becomes installable, shareable, and
 semver-versioned instead of a hand-wired set of `~/.claude/hooks/*.sh` scripts.
 
-It ships **two plugins**, deliberately kept separate:
+It ships **three plugins**, deliberately kept separate:
 
 | Plugin | Version | Contract | What it does |
 | --- | --- | --- | --- |
 | **coordkit** | 2.1.1 | **WARN-only — never blocks** | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other. |
-| **coordguard** | 1.1.0 | **HARD blocker** | An anti-clobber guard. On `Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it. |
+| **coordguard** | 1.2.0 | **HARD blocker** | An anti-clobber guard. On `Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it. |
+| **skillkit** | 1.0.0 | **Suggest-only — never blocks** | Skill auto-activation. On every prompt it matches layered `skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
 
 ## Why two plugins (the split rationale)
 
@@ -52,6 +53,16 @@ Add the marketplace, then install the plugin(s):
 
 # Optional hard anti-clobber guard:
 /plugin install coordguard@coordkit-marketplace
+
+# Skill auto-activation + agents + dev-docs:
+/plugin install skillkit@coordkit-marketplace
+```
+
+After installing skillkit, seed your global rules file (see
+`plugins/skillkit/README.md` for the schema):
+
+```bash
+cp <plugin-root>/templates/skill-rules.example.json ~/.claude/skills/skill-rules.json
 ```
 
 ### Scopes

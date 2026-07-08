@@ -5,8 +5,27 @@
     "name": "codehornets",
     "email": "codehornets@gmail.com"
   },
-  "description": "Multi-instance Claude Code coordination: a shared bus + ledger that warns about concurrent edits (coordkit), and an optional hard anti-clobber blocker (coordguard).",
+  "description": "Claude Code orchestration: a shared bus + ledger that warns about concurrent edits (coordkit), an optional hard anti-clobber blocker (coordguard), and skill auto-activation with agents and dev-docs (skillkit).",
   "plugins": [
+    {
+      "name": "skillkit",
+      "source": "./plugins/skillkit",
+      "description": "Skill auto-activation: a UserPromptSubmit hook matches prompts against layered skill-rules.json files (global ~/.claude/skills + per-project) and injects 'use this skill' reminders. Ships 10 specialized agents, /dev-docs context-persistence commands, and the skill-developer meta-skill. Suggest-only — never blocks.",
+      "version": "1.0.0",
+      "author": {
+        "name": "codehornets",
+        "email": "codehornets@gmail.com"
+      },
+      "keywords": [
+        "skills",
+        "auto-activation",
+        "hooks",
+        "agents",
+        "dev-docs",
+        "orchestration"
+      ],
+      "category": "workflow"
+    },
     {
       "name": "coordkit",
       "source": "./plugins/coordkit",

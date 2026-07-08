@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "description": "skillkit activation rules. Copy to ~/.claude/skills/skill-rules.json (global) or <project>/.claude/skills/skill-rules.json (per-project; overrides global per skill name). Skill names must be invocable by the Skill tool (use the plugin-qualified form, e.g. 'skillkit:skill-developer').",
+  "skills": {
+    "skillkit:skill-developer": {
+      "type": "domain",
+      "enforcement": "suggest",
+      "priority": "high",
+      "description": "Meta-skill for creating and managing Claude Code skills",
+      "promptTriggers": {
+        "keywords": [
+          "create skill",
+          "new skill",
+          "skill rules",
+          "skill-rules.json",
+          "skill triggers",
+          "skill activation"
+        ],
+        "intentPatterns": [
+          "(create|add|build|write).*?skill",
+          "skill.*?(trigger|activate|not activating)"
+        ]
+      }
+    },
+    "my-project-skill": {
+      "type": "domain",
+      "enforcement": "suggest",
+      "priority": "medium",
+      "description": "Example project entry — replace with your own skill",
+      "promptTriggers": {
+        "keywords": ["example keyword"],
+        "intentPatterns": ["(deploy|release).*?staging"]
+      }
+    }
+  }
+}
