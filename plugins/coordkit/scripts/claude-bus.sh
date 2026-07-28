@@ -9,10 +9,16 @@
 #
 # State in <repo>/.claude-bus/:
 #   agents/<sid>.json   heartbeat {sid,branch,cwd,task,files,last_seen}
-#   claims/<sha>.json   soft lock {path,sid,ts}
+#   claims/<sha>.json   soft FILE lock {path,sid,ts} — unrelated to TASK claims
 #   inbox/<sid>/*.msg   messages waiting for that instance
-#   TASKS.md            shared task board (claim/done)
 #   activity.log        feed: "<iso>\t<sid8>\t<verb>\t<detail>"
+#
+# `claim`/`done`/`tasks` are a free-text front-end over claude-ledger.sh's own
+# task queue (task/claim/next/done) — NOT a separate board. There used to be a
+# second, simpler markdown board (TASKS.md) here; it's gone. `claim "<desc>"`
+# now publishes+leases in one step via the ledger, `done "<text>"` resolves a
+# literal-substring match against open ledger tasks, `tasks` prints the
+# ledger's own projected board. See docs/LEDGER.md.
 #
 # Wired via the plugin's hooks/hooks.json (each hook runs
 # `bash ${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh <phase>`):
@@ -31,9 +37,9 @@
 # By hand:
 #   claude-bus.sh dashboard [repo]   one-shot snapshot (used by /bus)
 #   claude-bus.sh watch [repo]       live auto-refreshing monitor (run in a pane)
-#   claude-bus.sh claim "<desc>"     claim a task on the board
-#   claude-bus.sh done "<text>"      mark matching task(s) done
-#   claude-bus.sh tasks              print the task board
+#   claude-bus.sh claim "<desc>"     publish + immediately lease a ledger task
+#   claude-bus.sh done "<text>"      mark the first matching open task done
+#   claude-bus.sh tasks              print the ledger's projected task board
 #   claude-bus.sh msg <target> <text>   message all|<sid8>|branch:<name>
 #
 # Defensive: on any internal trouble it exits 0 (allow) so a bug here can never
@@ -67,7 +73,14 @@ mtime(){ stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 case "$phase" in
   dashboard|watch|frame)
     input=""; cwd="${2:-$PWD}"; sid="cli" ;;
-  claim|done|tasks|msg)
+  claim|done|tasks)
+    # Real session id when available (falls back to "cli" for a bare shell
+    # invocation) — these delegate to the ledger's task queue, whose lease/
+    # work-stealing liveness check needs a sid with an actual bus heartbeat,
+    # not the constant "cli" (which never has one and would look instantly
+    # abandoned). msg keeps the "cli"-only behavior below; see its own note.
+    input=""; cwd="${CLAUDE_PROJECT_DIR:-$PWD}"; sid="${CLAUDE_SESSION_ID:-cli}" ;;
+  msg)
     input=""; cwd="${CLAUDE_PROJECT_DIR:-$PWD}"; sid="cli" ;;
   *)
     input="$(cat)"
@@ -79,9 +92,12 @@ esac
 root="$(resolve_root "$cwd")"
 bus="${root}/.claude-bus"
 agents="${bus}/agents"; claims="${bus}/claims"; inbox="${bus}/inbox"
-log="${bus}/activity.log"; tasks_md="${bus}/TASKS.md"
+log="${bus}/activity.log"
 sid8="${sid:0:8}"
 curbr="$(branch_of "$cwd")"
+
+# Path to the ledger, whose task queue backs claim/done/tasks below.
+LEDGER_SH="$(ck_plugin_root)/scripts/claude-ledger.sh"
 
 ensure_dirs() {
   mkdir -p "$agents" "$claims" "$inbox" 2>/dev/null || return 1
@@ -366,34 +382,29 @@ case "$phase" in
     exit 0
     ;;
 
-  # ── task board ────────────────────────────────────────────────────────────
+  # ── task board — a free-text front-end over the ledger's own task queue ────
+  # (no separate storage here anymore; see the header note and docs/LEDGER.md)
   claim)
     shift; desc="$*"; [ -z "$desc" ] && { echo "usage: claude-bus.sh claim \"<description>\""; exit 0; }
-    ensure_dirs || exit 0
-    ( flock 9; printf -- '- [ ] (%s) %s  @%s\n' "$curbr" "$desc" "$(iso)" >> "$tasks_md" ) 9>"${bus}/.tasks.lock" 2>/dev/null
-    echo "✅ claimed on board (${tasks_md}): $desc  [as branch:${curbr}]"
+    [ -f "$LEDGER_SH" ] || { echo "claude-bus.sh: ledger script not found at $LEDGER_SH"; exit 0; }
+    subj="$(slug "$desc")"
+    bash "$LEDGER_SH" task "$desc" >/dev/null 2>&1
+    out="$(bash "$LEDGER_SH" claim "$subj" 2>&1)"
+    case "$out" in
+      🔒*) echo "✅ claimed (${subj}): $desc  [as branch:${curbr}]" ;;
+      *)   echo "$out" ;;   # already in-progress / already done — surface the ledger's own message
+    esac
     exit 0
     ;;
   done)
     shift; pat="$*"; [ -z "$pat" ] && { echo "usage: claude-bus.sh done \"<text to match>\""; exit 0; }
-    [ -f "$tasks_md" ] || { echo "no task board yet"; exit 0; }
-    # Match the task text LITERALLY (grep -nF), not as a regex — a user task
-    # containing . * [ ] ^ $ would otherwise over-match or break sed. Restrict
-    # to still-open lines, take the first, and check off exactly that line.
-    (
-      flock 9
-      lineno="$(grep -nF -- "$pat" "$tasks_md" 2>/dev/null | grep -E '^[0-9]+:- \[ \]' | head -n1 | cut -d: -f1)"
-      if [ -n "$lineno" ]; then
-        sed -i "${lineno}s/^- \[ \]/- [x]/" "$tasks_md"
-        echo "✅ marked done (matching: $pat)"
-      else
-        echo "no open task matching: $pat"
-      fi
-    ) 9>"${bus}/.tasks.lock" 2>/dev/null
+    [ -f "$LEDGER_SH" ] || { echo "claude-bus.sh: ledger script not found at $LEDGER_SH"; exit 0; }
+    bash "$LEDGER_SH" done-text "$pat"
     exit 0
     ;;
   tasks)
-    if [ -f "$tasks_md" ]; then echo "📋 Task board — ${tasks_md}"; echo; cat "$tasks_md"; else echo "No task board yet. Use: claude-bus.sh claim \"...\""; fi
+    [ -f "$LEDGER_SH" ] || { echo "claude-bus.sh: ledger script not found at $LEDGER_SH"; exit 0; }
+    bash "$LEDGER_SH" board
     exit 0
     ;;
 
@@ -469,9 +480,10 @@ case "$phase" in
       col="$(collisions)"; cany=0
       if [ -n "$col" ]; then while IFS=$'\t' read -r p who; do printf '  %b⚠ %s%b  ← %s\n' "$RED" "$p" "$RST" "$who"; cany=1; done <<< "$col"; fi
       [ "$cany" = 0 ] && echo "  (none)"
-      printf '%bTASK BOARD%b (open)\n' "$CYN" "$RST"
+      printf '%bTASK BOARD%b (open — from the ledger)\n' "$CYN" "$RST"
       tany=0
-      if [ -f "$tasks_md" ]; then grep -n '^- \[ \]' "$tasks_md" 2>/dev/null | sed 's/^[0-9]*://; s/^/  /' && tany=1; fi
+      tb="$([ -f "$LEDGER_SH" ] && bash "$LEDGER_SH" board 2>/dev/null | grep -E '^\s*\[ \]')"
+      if [ -n "$tb" ]; then printf '%s\n' "$tb" | sed 's/^/  /' && tany=1; fi
       [ "$tany" = 0 ] && echo "  (none)"
       printf '%bRECENT ACTIVITY%b (last 12)\n' "$CYN" "$RST"
       if [ -f "$log" ]; then tail -n 12 "$log" 2>/dev/null | sed 's/^/  /'; else echo "  (none)"; fi

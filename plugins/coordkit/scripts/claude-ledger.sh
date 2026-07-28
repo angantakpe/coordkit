@@ -23,6 +23,12 @@
 #   A claim whose lease expired OR whose owner's heartbeat is dead reverts the
 #   task to OPEN automatically → work-stealing, no leader needed.
 #
+# THIS is the one task queue in coordkit — claude-bus.sh's `/claim`/`/tasks`/
+# `done` are a thin free-text front-end over it (task+claim in one step, and a
+# literal-substring `done-text` lookup instead of an exact subject), not a
+# second system. See docs/LEDGER.md's "Two task systems" section for the
+# history of why that distinction used to be real and no longer is.
+#
 # Pagination / "raising the context layer":
 #   On SessionStart/UserPromptSubmit a TOKEN-BUDGETED digest is injected:
 #   materialized state (open/claimed tasks, recent decisions, open questions)
@@ -62,8 +68,8 @@ iso()  { date '+%Y-%m-%d %H:%M:%S'; }
 # than run on with an unresolvable root, per this script's never-wedge rule.
 # shellcheck source=./common.sh
 . "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh" || exit 0
-
-slug() { printf '%s' "$1" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | cut -c1-48; }
+# slug() now lives in common.sh — claude-bus.sh needs the identical transform
+# to compute a task's subject without parsing this script's stdout.
 
 # ── input handling: hook phases read JSON on stdin; CLI phases take args ──────
 case "$phase" in
@@ -731,10 +737,28 @@ case "$phase" in
   done)
     shift; subj="$(slug "${1:-}")"; [ -z "$subj" ] && { echo "usage: ... done <subject>"; exit 0; }
     s="$(append_event done "$subj" "done by ${sid8}")"; echo "✅ '${subj}' marked done (seq ${s})"; exit 0 ;;
+  # done-text "<substring>" — used by claude-bus.sh's `done` phase (the bus's
+  # simpler UX takes free text to match, not a subject). Finds the first
+  # NOT-done-and-not-blocked task whose description contains the text as a
+  # literal fixed string (grep -F, matching the old TASKS.md behavior this
+  # replaces — a task description containing . * [ ] must never be treated as
+  # a regex) and marks that subject done. Silent no-op message if no match.
+  done-text)
+    shift; pat="$*"; [ -z "$pat" ] && { echo "usage: ... done-text \"<text to match>\""; exit 0; }
+    ensure_dirs
+    match=""
+    while IFS=$US read -r s st desc; do
+      [ -n "$s" ] || continue
+      case "$st" in done|blocked) continue ;; esac
+      printf '%s' "$desc" | grep -qF -- "$pat" 2>/dev/null && { match="$s"; break; }
+    done < <(task_rows)
+    if [ -z "$match" ]; then echo "no open task matching: $pat"; exit 0; fi
+    s="$(append_event done "$match" "done by ${sid8}")"
+    echo "✅ '${match}' marked done (matching: $pat, seq ${s})"; exit 0 ;;
   block)
     shift; subj="$(slug "${1:-}")"; shift || true; why="$*"
     [ -z "$subj" ] && { echo "usage: ... block <subject> \"<why>\""; exit 0; }
     s="$(append_event block "$subj" "${why:-blocked}")"; echo "⛔ '${subj}' marked blocked (seq ${s})"; exit 0 ;;
 
-  *) echo "phases: start|prompt|digest|board|note|decide|ask|answer|task|claim|next|done|block|trust|distrust|compact"; exit 0 ;;
+  *) echo "phases: start|prompt|digest|board|note|decide|ask|answer|task|claim|next|done|done-text|block|trust|distrust|compact"; exit 0 ;;
 esac

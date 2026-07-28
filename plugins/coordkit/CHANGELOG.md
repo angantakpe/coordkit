@@ -8,6 +8,35 @@ ship an update to installed users.
 coordguard is a separate plugin on its own version axis — its entries live in
 `plugins/coordguard/CHANGELOG.md`.
 
+## 2.3.0
+
+### Changed
+- **Consolidated the two task systems into one.** `claude-bus.sh`'s
+  `claim`/`done`/`tasks` used to read/write their own `TASKS.md` markdown
+  board — a second, simpler, unrelated store sitting alongside the ledger's
+  own event-sourced task queue, with confusingly-overlapping verb names.
+  `TASKS.md` is gone. `claim "<desc>"` now publishes a task to the ledger
+  and immediately leases it in one step (via the shared `slug()`, now in
+  `common.sh`, so the computed subject always matches what `/led task` would
+  mint for the same text); `done "<text>"` resolves a literal-substring
+  match against open ledger tasks and marks that subject done; `tasks`
+  prints the ledger's own projected board. Both front-ends write the
+  identical event stream now, so a `/claim`'d task is immediately visible to
+  `/led next`'s dependency resolution and vice versa.
+- Fixed `claim`/`done`/`tasks`'s session-id resolution: these three now use
+  `${CLAUDE_SESSION_ID:-cli}` instead of a hardcoded `"cli"`, so a task
+  claimed through `/claim` correctly shows as "in-progress" (backed by a real,
+  heartbeating bus session) instead of immediately looking abandoned by the
+  ledger's work-stealing check. `msg` deliberately keeps `"cli"` — see its own
+  inline note.
+- Added `claude-ledger.sh done-text "<substring>"`, the phase `claude-bus.sh
+  done` now delegates to.
+
+### Added
+- `docs/BUS.md` and `docs/LEDGER.md` — the deep-dive documentation this
+  consolidation (and the trust-gate/race-fix work before it) never had; the
+  README only ever name-dropped these two subsystems in passing.
+
 ## 2.2.1
 
 ### Changed

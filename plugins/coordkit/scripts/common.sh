@@ -76,6 +76,12 @@ branch_of() {
   if [ -n "$b" ]; then printf '%s' "$b"; else printf 'detached'; fi
 }
 
+# Deterministic subject slug from free text — the SAME transform claude-ledger.sh
+# uses for its task/decision/question subjects, so a caller (e.g. claude-bus.sh's
+# `claim`, which delegates to the ledger's task queue) can compute the identical
+# subject a "task <desc>" call will mint, without parsing the ledger's own stdout.
+slug() { printf '%s' "$1" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | cut -c1-48; }
+
 # --------------------------------------------------------------------------- #
 # Actor identity — ONE stable id per (machine + user + home), persisted in
 # ${data}/site.json. This is THIS machine's own identity; it is NOT the same
