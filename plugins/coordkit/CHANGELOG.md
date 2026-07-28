@@ -5,32 +5,32 @@ All notable changes to **coordkit** are documented here. This project follows
 `.claude-plugin/plugin.json` is the canonical tooling-version axis — bump it to
 ship an update to installed users.
 
-## coordguard 1.2.0
+coordguard is a separate plugin on its own version axis — its entries live in
+`plugins/coordguard/CHANGELOG.md`.
 
-Closes the guard's documented Bash blind spot.
+## 2.2.0
 
-### Fixed
-- **Self-inflicted Bash edits no longer false-positive.** Files this session
-  modified via its own Bash commands (`sed -i`, formatters, `git checkout`)
-  used to go stale in the fingerprint store and deny the next Write/Edit.
-  Every Bash call is now bracketed: a `snapshot` hook (PreToolUse Bash) lists
-  the tracked files that still match their record, and an `absorb` hook
-  (PostToolUse Bash) re-stamps any of those that changed while the command ran
-  — a change inside this session's own Bash window is attributed to it. A file
-  already stale *before* the Bash call (a sibling's edit) is deliberately not
-  absorbed and still denies. The two halves of a call are paired by
-  `tool_use_id` when the host provides it, with a shared-slot fallback that
-  degrades to the old deny-and-re-Read behavior at worst, never to a wrong
-  allow.
+Adds the missing lifecycle command, and makes the event schema describe what is
+actually implemented.
+
+### Added
+- **`cobus gc`** (`scripts/gc.sh`) — manual garbage collection for a repo's
+  `.claude-bus/`. Reaps hard-stale agent heartbeats, claims with no live owner,
+  cursors whose session is gone, and empty inbox dirs; trims an oversized
+  `activity.log` to `--keep N` lines. **Dry-run is the default** — nothing is
+  deleted without `--apply`. `--nuke` removes the whole bus and is refused
+  unless `--yes-i-am-sure` is passed alongside it. This complements (does not
+  replace) the automatic `prune_dead` at SessionStart and the 600-line log
+  auto-trim, which only ever handled the common cases.
 
 ### Changed
-- **Record format now stores the file path** (line 2, after the fingerprint)
-  so `snapshot`/`absorb` can re-stat tracked files. Old single-line records
-  from ≤1.1.0 are still honored by `check` and simply skipped by the
-  bracketing (deny + re-Read once, then they upgrade on the next record).
-- Deny messages updated: still-remaining untracked cases (files the session
-  never Read, including files its Bash commands *create*) now say so
-  explicitly.
+- **`schema/event.schema.json` field descriptions now separate implemented from
+  reserved behavior.** No structural change — required fields, types, and
+  validity are untouched, so every existing event still validates. `clock.c` no
+  longer claims to be "advanced past max observed" (it is a plain per-actor
+  local counter; cross-replica clock reconciliation is not implemented);
+  `sig`, `supersedes`, and `user` are labelled RESERVED / NOT YET IMPLEMENTED,
+  since nothing populates or reads them today.
 
 ## 2.1.1
 

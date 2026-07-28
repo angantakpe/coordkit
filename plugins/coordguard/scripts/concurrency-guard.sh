@@ -8,12 +8,11 @@
 # edited it.
 #
 # Usage (wired from hooks/hooks.json):
-#   PreToolUse  Write|Edit  -> concurrency-guard.sh check
-#   PostToolUse Read         -> concurrency-guard.sh record
-#   PostToolUse Write|Edit   -> concurrency-guard.sh record
-#   PreToolUse  Bash         -> concurrency-guard.sh snapshot
-#   PostToolUse Bash         -> concurrency-guard.sh absorb
-#   SessionEnd               -> concurrency-guard.sh cleanup
+#   PreToolUse  Write|Edit|NotebookEdit       -> concurrency-guard.sh check
+#   PostToolUse Read|Write|Edit|NotebookEdit  -> concurrency-guard.sh record
+#   PreToolUse  Bash                          -> concurrency-guard.sh snapshot
+#   PostToolUse Bash                          -> concurrency-guard.sh absorb
+#   SessionEnd                                -> concurrency-guard.sh cleanup
 #
 # BASH BRACKETING — a hook can't know which files an arbitrary shell command
 # touched (sed -i, formatters, git checkout, …), so files this session modified
@@ -46,9 +45,33 @@ phase="${1:-check}"
 input="$(cat)"
 
 sid="$(printf '%s' "$input" | jq -r '.session_id // "nosession"' 2>/dev/null)"
-[ -z "$sid" ] && sid="nosession"
+# The sid is used to build filesystem paths (and rm -rf targets in `cleanup`), so it
+# must be a single, non-empty path component. Anything else degrades to a fixed safe
+# value rather than erroring — never wedge the session.
+case "$sid" in
+  ""|.|..|*/*|*$'\n'*) sid="nosession" ;;
+esac
 
-base="${TMPDIR:-/tmp}/claude-concurrency"
+# State root: prefer a per-user directory (XDG_RUNTIME_DIR is 0700 and per-user on
+# Linux; $HOME/.cache is per-user too). World-writable /tmp is a last resort — there
+# another local user can pre-create the tree and make our mkdir/writes fail silently,
+# or plant fake fingerprints. Fall back rather than fail if nothing else is writable.
+pick_base() {
+  local cands=() cand
+  [ -n "${XDG_RUNTIME_DIR:-}" ] && cands+=("${XDG_RUNTIME_DIR}/claude-concurrency")
+  [ -n "${HOME:-}" ] && cands+=("${HOME}/.cache/claude-concurrency")
+  cands+=("${TMPDIR:-/tmp}/claude-concurrency")
+  for cand in "${cands[@]}"; do
+    if mkdir -p "$cand" 2>/dev/null && [ -w "$cand" ]; then
+      chmod 700 "$cand" 2>/dev/null
+      printf '%s' "$cand"
+      return
+    fi
+  done
+  printf '%s' "${TMPDIR:-/tmp}/claude-concurrency"
+}
+
+base="$(pick_base)"
 statedir="${base}/${sid}"
 
 # Composite fingerprint: high-resolution mtime + size, joined by ':'. The size
@@ -67,9 +90,9 @@ fingerprint() {
 
 # ---- cleanup: SessionEnd, no file_path — handle before the file guard ----------
 if [ "$phase" = "cleanup" ]; then
-  # Remove ONLY this session's statedir. Refuse anything that isn't a single,
-  # non-empty path component so a hostile session_id (e.g. "../..") can't make us
-  # rm outside the claude-concurrency tree.
+  # Remove ONLY this session's statedir. $sid was already validated as a single,
+  # non-empty path component above; re-check here so a hostile session_id (e.g.
+  # "../..") can never make us rm outside the claude-concurrency tree.
   case "$sid" in
     ""|.|..|*/*|*$'\n'*) exit 0 ;;
   esac
@@ -129,7 +152,8 @@ if [ "$phase" = "snapshot" ] || [ "$phase" = "absorb" ]; then
 fi
 
 # ---- everything else is file-scoped -------------------------------------------
-file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)"
+# NotebookEdit names its target `notebook_path` instead of `file_path`.
+file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)"
 
 # No file path (or jq failed) -> nothing to guard.
 [ -z "$file" ] && exit 0

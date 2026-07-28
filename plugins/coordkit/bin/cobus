@@ -45,6 +45,10 @@ Setup / transport:
   init-git [room] [remote]    enable git-mode sharing for this repo
   sync                        replicate the git-mode log (run on a timer, not a hook)
   migrate                     append the v2 schema-upgrade marker (append-only)
+  gc [--apply] [repo]         garbage-collect this repo's .claude-bus/ (dead
+                              agents/claims/cursors, oversized activity.log).
+                              Dry-run by default; --apply to delete. Add
+                              --nuke --yes-i-am-sure to remove the bus entirely.
 EOF
 }
 
@@ -57,6 +61,7 @@ case "${1:-}" in
   init-git) shift; exec bash "${ROOT}/scripts/init-git.sh" "$@" ;;
   sync)     shift; exec bash "${ROOT}/bin/sync.sh" "$@" ;;
   migrate)  shift; exec bash "${ROOT}/scripts/migrate.sh" "$@" ;;
+  gc)       shift; exec bash "${ROOT}/scripts/gc.sh" "$@" ;;
 esac
 
 if [ ! -x "$LEDGER" ]; then

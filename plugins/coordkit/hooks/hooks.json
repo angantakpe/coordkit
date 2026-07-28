@@ -6,12 +6,14 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "start"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "start"],
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh", "start"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh", "start"],
+            "timeout": 5
           }
         ]
       }
@@ -22,36 +24,40 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "task"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "task"],
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh", "prompt"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh", "prompt"],
+            "timeout": 5
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "check"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "check"],
+            "timeout": 5
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Read|Bash",
+        "matcher": "Write|Edit|NotebookEdit|Read|Bash",
         "hooks": [
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "record"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "record"],
+            "timeout": 5
           }
         ]
       }
@@ -62,7 +68,8 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "stop"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "stop"],
+            "timeout": 5
           }
         ]
       }

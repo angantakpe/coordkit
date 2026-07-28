@@ -145,15 +145,17 @@ agent_live()   { [ -f "${agents}/$1.json" ] && [ "$(agent_age "$1")" -le "$STALE
 
 # tab-rows of OTHER live agents: sid8 \t state \t age \t branch \t task \t files
 others_live() {
+  # One jq per agent file (not one per field): @tsv also escapes any literal
+  # tab inside task/branch, so the tab-separated contract stays intact.
   local t f s last age br task files state; t="$(now)"
   for f in "$agents"/*.json; do
     [ -e "$f" ] || continue
-    s="$(jq -r '.sid // ""' "$f" 2>/dev/null)"; [ "$s" = "$sid" ] && continue
-    last="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$last" ] && last=0
+    IFS=$'\t' read -r s last br task files <<< "$(jq -r \
+      '[.sid // "", .last_seen // 0, .branch // "?", .task // "", ((.files // [])|join(", "))] | @tsv' \
+      "$f" 2>/dev/null)"
+    [ "$s" = "$sid" ] && continue
+    case "${last:-}" in ''|*[!0-9]*) last=0 ;; esac
     age=$(( t - last )); [ "$age" -gt "$STALE_HARD" ] && continue
-    br="$(jq -r '.branch // "?"' "$f" 2>/dev/null)"
-    task="$(jq -r '.task // ""' "$f" 2>/dev/null)"
-    files="$(jq -r '(.files // []) | join(", ")' "$f" 2>/dev/null)"
     state="live"; [ "$age" -gt "$STALE_SOFT" ] && state="idle"
     printf '%s\t%s\t%ss\t%s\t%s\t%s\n' "${s:0:8}" "$state" "$age" "$br" "$task" "$files"
   done
@@ -161,15 +163,19 @@ others_live() {
 
 # files touched by >=2 distinct live agents -> "path \t who"
 collisions() {
-  local t f s last age fl; t="$(now)"
+  # One jq per agent file: sid + last_seen + the file list joined on US (\037),
+  # which can't occur in a path, then split in-shell.
+  local t f s last age fl rest; t="$(now)"
   for f in "$agents"/*.json; do
     [ -e "$f" ] || continue
-    s="$(jq -r '.sid // ""' "$f" 2>/dev/null)"
-    last="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$last" ] && last=0
+    IFS=$'\t' read -r s last rest <<< "$(jq -r \
+      '[.sid // "", .last_seen // 0, ((.files // [])|join("\u001f"))] | @tsv' \
+      "$f" 2>/dev/null)"
+    case "${last:-}" in ''|*[!0-9]*) last=0 ;; esac
     age=$(( t - last )); [ "$age" -gt "$STALE_HARD" ] && continue
-    jq -r '(.files // [])[]' "$f" 2>/dev/null | while IFS= read -r fl; do
+    while IFS= read -r fl; do
       [ -n "$fl" ] && printf '%s\t%s\n' "${s:0:8}" "$fl"
-    done
+    done <<< "$(printf '%s' "${rest:-}" | tr '\037' '\n')"
   done | sort -u | awk -F'\t' '{c[$2]++; who[$2]=who[$2] (who[$2]==""?"":", ") $1}
                                 END{for(p in c) if(c[p]>1) printf "%s\t%s\n",p,who[p]}'
 }
@@ -289,9 +295,14 @@ case "$phase" in
     [ -z "$file" ] && exit 0
     key="$(printf '%s' "$file" | sha1sum | cut -d' ' -f1)"
     cf="${claims}/${key}.json"; [ -f "$cf" ] || exit 0
-    owner="$(jq -r '.sid // ""' "$cf" 2>/dev/null)"
+    IFS=$'\t' read -r owner cts <<< "$(jq -r '[.sid // "", .ts // 0] | @tsv' "$cf" 2>/dev/null)"
     { [ -z "$owner" ] || [ "$owner" = "$sid" ]; } && exit 0
     agent_live "$owner" || exit 0
+    # Warn only about a RECENT touch. The claim survives (the dashboard still
+    # reports it as history), but a sibling that touched this file once an hour
+    # ago and moved on shouldn't warn every edit for the rest of its session.
+    case "${cts:-}" in ''|*[!0-9]*) cts=0 ;; esac
+    [ $(( $(now) - cts )) -gt "$STALE_SOFT" ] && exit 0
     obr="$(jq -r '.branch // "?"' "${agents}/${owner}.json" 2>/dev/null)"
     age="$(agent_age "$owner")"; rel="${file#$root/}"
     # debounced desktop notification
@@ -336,12 +347,16 @@ case "$phase" in
     # the badge. Each session is classified by its FRESHEST heartbeat.
     t="$(now)"
     counts="$(
+      # The statusline re-runs this on every refresh tick, so keep it to ONE jq
+      # per agent file: jq emits the awk contract (sid8 \t age \t branch)
+      # directly. Still per-file rather than one pass over the glob so a single
+      # corrupt heartbeat can't blank the whole badge.
       for f in "$agents"/*.json; do
         [ -e "$f" ] || continue
-        s="$(jq -r '.sid // ""' "$f" 2>/dev/null)"; [ -z "$s" ] && continue
-        l="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$l" ] && l=0
-        b="$(jq -r '.branch // ""' "$f" 2>/dev/null)"
-        printf '%s\t%s\t%s\n' "${s:0:8}" "$(( t - l ))" "$b"
+        jq -r --argjson t "$t" \
+          'select((.sid // "") != "")
+           | [(.sid)[0:8], ($t - (.last_seen // 0)), (.branch // "")] | @tsv' \
+          "$f" 2>/dev/null
       done | awk -F'\t' -v me="${sid:0:8}" -v soft="$STALE_SOFT" -v hard="$STALE_HARD" -v cur="$curbr" '
         { id=$1; age=$2+0; br=$3
           if (age>hard) next

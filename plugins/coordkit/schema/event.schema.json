@@ -26,11 +26,11 @@
     },
     "clock": {
       "type": "object",
-      "description": "Per-actor monotonic clock: wall-ms + counter. Advances past the max observed clock. Total order across replicas = sort by (clock.p, clock.c, actor) — machine-independent, NOT wall-clock last-writer-wins.",
+      "description": "Per-actor clock: wall-ms + counter. The INTENDED total order across replicas is sort by (clock.p, clock.c, actor) — machine-independent, NOT wall-clock last-writer-wins. STATUS: the ordering rule is not yet the read path; the shipped ledger still reads in local `seq` order (see the `seq` field).",
       "required": ["p", "c"],
       "properties": {
         "p": { "type": "integer", "description": "wall-clock milliseconds" },
-        "c": { "type": "integer", "description": "monotonic counter, advanced past max observed" }
+        "c": { "type": "integer", "description": "AS IMPLEMENTED: a plain local monotonic counter, incremented once per emitted event and persisted per-actor in ${CLAUDE_PLUGIN_DATA}/clock.state. It is NOT reconciled against other actors — nothing observes peers' clocks or advances past a max observed value. True cross-replica clock advancement (Lamport-style) is RESERVED for future work and NOT YET IMPLEMENTED." }
       }
     },
     "seq": {
@@ -39,7 +39,7 @@
     },
     "sid":    { "type": "string", "description": "Originating Claude session id." },
     "sid8":   { "type": "string", "description": "First 8 chars of sid (display)." },
-    "user":   { "type": "string", "description": "Identity for multi-user trust (server-stamped from the verified token in relay mode)." },
+    "user":   { "type": "string", "description": "RESERVED — identity for multi-user trust. AS IMPLEMENTED: stamped locally from $USER and never read back by any code path, so it is advisory metadata only and carries NO trust. Server-stamping from a verified token in relay mode is the intended design and is NOT YET IMPLEMENTED (the relay transport is itself a stub)." },
     "branch": { "type": "string", "description": "Git branch at write time (or \"no-git\")." },
     "type": {
       "type": "string",
@@ -70,11 +70,11 @@
     },
     "supersedes": {
       "type": ["string", "null"],
-      "description": "eid of the prior version of this subject (explicit version chain for audit/history)."
+      "description": "RESERVED — eid of the prior version of this subject, an explicit version chain for audit/history. NOT YET IMPLEMENTED: the emitter always writes null and no reader consults it; subject reconciliation is done positionally (latest event per subject wins), not by walking this chain."
     },
     "sig": {
       "type": ["string", "null"],
-      "description": "OPTIONAL detached ed25519 signature over canonical(event minus sig). Absent (null) in default local mode."
+      "description": "RESERVED — detached ed25519 signature over canonical(event minus sig). NOT YET IMPLEMENTED: nothing signs and nothing verifies; the emitter always writes null. The field is carved out now so signed events stay eid-compatible later (eid is computed over the event minus eid and sig, so adding a signature never changes an event's id)."
     }
   }
 }

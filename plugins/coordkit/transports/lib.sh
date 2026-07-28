@@ -64,11 +64,20 @@ __logstore_transports_dir() {
   ( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd )
 }
 
-# Resolve the repo root the same way bin/sync.sh does, so every transport agrees
-# on where the coordination state lives.
+# Resolve the repo root using the EXACT precedence of claude-ledger.sh's
+# resolve_root(), so the ledger's own state and the transport's segment state can
+# never split across two different trees:
+#
+#   CLAUDE_BUS_ROOT > git toplevel > nearest ancestor with .claude-bus/ >
+#   CLAUDE_PROJECT_DIR > cwd
+#
+# The git-toplevel-before-CLAUDE_PROJECT_DIR order matters in a workspace of nested
+# git repos under a non-git parent project dir: preferring CLAUDE_PROJECT_DIR there
+# would resolve the transport to the PARENT while the ledger resolved to the nested
+# repo. The ancestor-.claude-bus probe is what lets a non-git subdir join a parent
+# bus, so it must stay ahead of the CLAUDE_PROJECT_DIR fallback.
 __logstore_repo_root() {
-  if [ -n "${CLAUDE_BUS_ROOT:-}" ];    then printf '%s' "$CLAUDE_BUS_ROOT";    return 0; fi
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return 0; fi
+  if [ -n "${CLAUDE_BUS_ROOT:-}" ]; then printf '%s' "$CLAUDE_BUS_ROOT"; return 0; fi
   local top dir
   top="$(git rev-parse --show-toplevel 2>/dev/null)"
   if [ -n "$top" ]; then printf '%s' "$top"; return 0; fi
@@ -77,6 +86,7 @@ __logstore_repo_root() {
     [ -d "$dir/.claude-bus" ] && { printf '%s' "$dir"; return 0; }
     dir="$(dirname "$dir")"
   done
+  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return 0; fi
   printf '%s' "$PWD"
 }
 

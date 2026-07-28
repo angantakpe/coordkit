@@ -5,3 +5,7 @@
 /.claude-bus/
 .DS_Store
 *.swp
+
+# claude-mem drops a per-directory CLAUDE.local.md context stub throughout the
+# tree. They are generated session artifacts, not part of the packaged plugins.
+**/CLAUDE.local.md

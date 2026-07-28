@@ -2,12 +2,13 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
             "command": "bash",
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "check"],
+            "timeout": 5,
             "statusMessage": "Checking for concurrent edits..."
           }
         ]
@@ -18,19 +19,21 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "snapshot"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "snapshot"],
+            "timeout": 5
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Read|Write|Edit",
+        "matcher": "Read|Write|Edit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "record"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "record"],
+            "timeout": 5
           }
         ]
       },
@@ -40,7 +43,8 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "absorb"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "absorb"],
+            "timeout": 5
           }
         ]
       }
@@ -51,7 +55,8 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "cleanup"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/concurrency-guard.sh", "cleanup"],
+            "timeout": 5
           }
         ]
       }

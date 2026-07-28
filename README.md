@@ -4,15 +4,28 @@ A Claude Code plugin marketplace that packages a working **same-machine,
 multi-instance coordination system** so it becomes installable, shareable, and
 semver-versioned instead of a hand-wired set of `~/.claude/hooks/*.sh` scripts.
 
+## Scope note
+
+`skillkit` is bundled in this marketplace for convenience, but it is
+functionally unrelated to what the repo is named for: coordkit and coordguard
+are two halves of one coordination story, while skillkit is skill
+auto-activation and shares no concepts, state, or hooks with them. Splitting it
+into its own marketplace — or renaming this repo to something scope-neutral —
+is worth doing as more unrelated plugins land here. **Flagged, not yet acted
+on.**
+
 It ships **three plugins**, deliberately kept separate:
 
 | Plugin | Version | Contract | What it does |
 | --- | --- | --- | --- |
-| **coordkit** | 2.1.1 | **WARN-only — never blocks** | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other. |
+| **coordkit** | 2.2.0 | **WARN-only — never blocks** | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other. |
 | **coordguard** | 1.2.0 | **HARD blocker** | An anti-clobber guard. On `Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it. |
-| **skillkit** | 1.0.0 | **Suggest-only — never blocks** | Skill auto-activation. On every prompt it matches layered `skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
+| **skillkit** | 1.0.1 | **Suggest-only — never blocks** | Skill auto-activation. On every prompt it matches layered `skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
 
-## Why two plugins (the split rationale)
+## Why coordkit and coordguard are split
+
+*(This section is about those two only — skillkit is a separate concern; see the
+scope note above.)*
 
 coordkit's entire value is that it is **safe to always run**: it observes and
 reports, it never wedges a tool call. The moment a coordination layer can *block*
@@ -29,7 +42,7 @@ own axis:
 
 1. **Distribution / packaging** *(this README, the marketplace, plugin manifests,
    hook wiring)* — how the system is installed, versioned, and updated. The
-   coordkit `version` (currently `2.1.1`) is the tooling-version axis.
+   coordkit `version` (currently `2.2.0`) is the tooling-version axis.
 2. **Schema** *(`plugins/coordkit/schema/`)* — the versioned event envelope
    plus its JSON Schema, manifest, and migrations. The envelope version is
    configurable and the ledger accepts either version on read; this is the
@@ -57,6 +70,16 @@ Add the marketplace, then install the plugin(s):
 # Skill auto-activation + agents + dev-docs:
 /plugin install skillkit@coordkit-marketplace
 ```
+
+> **Distribution reality check.** As currently configured this repo's only
+> remote is **private** (`git@github.com:angantakpe/coordkit-marketplace.git`),
+> so the hosted `/plugin marketplace add <owner>/coordkit-marketplace` form
+> works **only for the repo owner and anyone explicitly granted access** — for
+> everyone else it fails at clone time. Genuinely shareable distribution needs
+> either making the repo public or documenting an access-request path; neither
+> has been done. Until then, the local-clone form
+> (`/plugin marketplace add ./coordkit-marketplace`) is the path that works for
+> anyone who has the files.
 
 After installing skillkit, seed your global rules file (see
 `plugins/skillkit/README.md` for the schema):
@@ -125,6 +148,28 @@ Both prior caveats were tested on Claude Code **v2.1.193** (empirical dry-run vi
   current changelog; `hookSpecificOutput.additionalContext` from a plugin
   `SessionStart` hook is injected (since v2.1.152+) and even re-runs on resume.
   `claude-ledger.sh` injects the shared-context digest on `SessionStart` directly.
+
+## Maintenance — garbage-collecting a bus
+
+`.claude-bus/` state is pruned opportunistically (dead heartbeats and their
+orphaned claims at `SessionStart`; `activity.log` auto-trimmed past 600 lines),
+but nothing ever cleans a bus you've stopped using. `cobus gc` is the manual
+pass — **dry-run by default, it deletes nothing without `--apply`**:
+
+```bash
+cobus gc                    # report what would be reaped, change nothing
+cobus gc --apply            # actually reap
+cobus gc --apply --keep 100 # ...and trim activity.log harder
+```
+
+It reaps hard-stale agent records, claims with no live owner, cursors whose
+session is gone, and empty inbox dirs. To abandon a project's bus entirely
+there is `--nuke`, which is deliberately double-gated because it discards the
+shared ledger and all history irreversibly, for every instance:
+
+```bash
+cobus gc --nuke --yes-i-am-sure --apply
+```
 
 Persistent identity (site id, clock counter) lives in `${CLAUDE_PLUGIN_DATA}`,
 which **survives plugin updates** (the versioned `${CLAUDE_PLUGIN_ROOT}` cache does not).
