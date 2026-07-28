@@ -6,23 +6,15 @@
 # no-op once the marker for the current epoch exists.
 set -uo pipefail
 
-ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}"
+# resolve_root() / ck_actor() / ck_clock_c() come from the shared library, so
+# migrate resolves the same repo and mints the same actor id as the ledger.
+# shellcheck source=./common.sh
+. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh"
+
+ROOT="$(ck_plugin_root)"
 SCHEMA_DIR="${ROOT}/schema"
 
-resolve_root() {
-  local cwd="${CLAUDE_PROJECT_DIR:-$PWD}" dir
-  if [ -n "${CLAUDE_BUS_ROOT:-}" ]; then printf '%s' "$CLAUDE_BUS_ROOT"; return; fi
-  local top; top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
-  [ -n "$top" ] && { printf '%s' "$top"; return; }
-  dir="$cwd"
-  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-    [ -d "$dir/.claude-bus" ] && { printf '%s' "$dir"; return; }
-    dir="$(dirname "$dir")"
-  done
-  printf '%s' "$cwd"
-}
-
-repo="$(resolve_root)"
+repo="$(resolve_root "${CLAUDE_PROJECT_DIR:-$PWD}")"
 bus="${repo}/.claude-bus"
 ledger="${bus}/ledger.jsonl"
 lock="${bus}/.ledger.lock"
@@ -33,7 +25,6 @@ mkdir -p "$bus" 2>/dev/null || { echo "coordkit migrate: cannot create $bus" >&2
 if [ -f "${SCHEMA_DIR}/MANIFEST.json" ]; then
   cp -n "${SCHEMA_DIR}/MANIFEST.json" "${bus}/MANIFEST.json" 2>/dev/null || true
 fi
-CK_DATA="${COORDKIT_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/coordkit-data}}"
 
 # robust max seq — mirrors claude-ledger.sh's max_seq so a corrupt / seq-less
 # LAST line can never reset the sequence to 0 (which would blind every downstream
@@ -48,26 +39,6 @@ mig_max_seq() {
   esac
   jq -Rrn '[inputs | fromjson? | .seq? | numbers] | max // 0' "$ledger" 2>/dev/null || echo 0
 }
-# stable actor id — reuse the persisted site.json, derive if absent (same rule as
-# bootstrap.sh / claude-ledger.sh's ensure_site).
-mig_actor() {
-  local f="${CK_DATA}/site.json" a seed h
-  a="$(jq -r '.actor // empty' "$f" 2>/dev/null)"
-  [ -n "$a" ] && { printf '%s' "$a"; return; }
-  seed="${HOSTNAME:-host}-${USER:-user}-${HOME:-/}"
-  if command -v b3sum >/dev/null 2>&1; then h="$(printf '%s' "$seed" | b3sum 2>/dev/null | cut -c1-8)"
-  else h="$(printf '%s' "$seed" | sha256sum 2>/dev/null | cut -c1-8)"; fi
-  printf 'site-%s' "${h:-00000000}"
-}
-# per-actor monotonic clock counter (advances under its own lock).
-mig_clock_c() {
-  local f="${CK_DATA}/clock.state" c
-  mkdir -p "$CK_DATA" 2>/dev/null
-  ( flock 8
-    c="$(cat "$f" 2>/dev/null)"; [ -z "$c" ] && c=0; c=$(( c + 1 )); printf '%s' "$c" > "$f"; printf '%s' "$c"
-  ) 8>"${f}.lock"
-}
-
 epoch="$(jq -r '.compaction_epoch // 0' "${SCHEMA_DIR}/MANIFEST.json" 2>/dev/null || echo 0)"
 case "$epoch" in ''|*[!0-9]*) epoch=0 ;; esac
 
@@ -91,9 +62,9 @@ fi
 ( flock 9
   seq="$(mig_max_seq)"; case "$seq" in ''|*[!0-9]*) seq=0 ;; esac; seq=$(( seq + 1 ))
   ts="$(date +%s)"
-  actor="$(mig_actor)"
+  actor="$(ck_actor)"
   p="$(date +%s%3N 2>/dev/null)"; case "$p" in *[!0-9]*|'') p="$(( ts * 1000 ))";; esac
-  c="$(mig_clock_c)"; case "$c" in ''|*[!0-9]*) c=1 ;; esac
+  c="$(ck_clock_c)"; case "$c" in ''|*[!0-9]*) c=1 ;; esac
   id="$(printf '%x%04x' "$ts" "$(( ${RANDOM:-0} ))")"
   hasher="sha256"; hcmd="sha256sum"
   command -v b3sum >/dev/null 2>&1 && { hasher="blake3"; hcmd="b3sum"; }

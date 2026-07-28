@@ -8,27 +8,21 @@
 # persistent plugin data dir. No-op if already set. NEVER blocks: always exits 0.
 set -uo pipefail
 
-DATA="${COORDKIT_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/coordkit-data}}"
-SITE="${DATA}/site.json"
+# shellcheck source=./common.sh
+. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh" || exit 0
 
-mkdir -p "$DATA" 2>/dev/null || exit 0
+SITE="$(ck_data_dir)/site.json"
 
 if [ -s "$SITE" ] && jq -e '.actor' "$SITE" >/dev/null 2>&1; then
   exit 0   # already bootstrapped
 fi
 
-# derive a stable actor id from host+user+home (NOT cwd — one identity per machine/user)
-seed="${HOSTNAME:-$(hostname 2>/dev/null || echo host)}-${USER:-$(id -un 2>/dev/null || echo user)}-${HOME:-/}"
-if command -v b3sum >/dev/null 2>&1; then
-  digest="$(printf '%s' "$seed" | b3sum 2>/dev/null | cut -c1-8)"
-else
-  digest="$(printf '%s' "$seed" | sha256sum 2>/dev/null | cut -c1-8)"
-fi
-actor="site-${digest:-00000000}"
-
-jq -nc --arg actor "$actor" --arg user "${USER:-}" --arg host "${HOSTNAME:-}" \
-  '{actor:$actor, user:$user, host:$host}' > "$SITE" 2>/dev/null || exit 0
+# ck_ensure_site() derives the stable actor id from host+user+home (NOT cwd —
+# one identity per machine/user) and persists it. Same helper claude-ledger.sh
+# calls on its self-bootstrapping path, so both agree by construction.
+ck_ensure_site
 
 # emit nothing to stdout on the hook path (avoid polluting context); a CLI caller sees it on stderr
-printf 'coordkit: bootstrapped actor %s\n' "$actor" >&2 2>/dev/null || true
+actor="$(jq -r '.actor // empty' "$SITE" 2>/dev/null)"
+[ -n "$actor" ] && printf 'coordkit: bootstrapped actor %s\n' "$actor" >&2 2>/dev/null
 exit 0

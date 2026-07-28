@@ -55,21 +55,14 @@ US=$'\x1f'           # projection field separator: NOT IFS-whitespace, so
 now()  { date +%s; }
 iso()  { date '+%Y-%m-%d %H:%M:%S'; }
 
-resolve_root() {
-  local cwd="$1" top dir
-  # explicit pin wins over everything — lets sibling non-git subdirs share one bus
-  if [ -n "${CLAUDE_BUS_ROOT:-}" ]; then printf '%s' "$CLAUDE_BUS_ROOT"; return; fi
-  top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
-  if [ -n "$top" ]; then printf '%s' "$top"; return; fi
-  dir="$cwd"
-  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-    [ -d "$dir/.claude-bus" ] && { printf '%s' "$dir"; return; }
-    dir="$(dirname "$dir")"
-  done
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return; fi
-  printf '%s' "$cwd"
-}
-branch_of() { git -C "$1" branch --show-current 2>/dev/null || printf 'no-git'; }
+# resolve_root() / branch_of() / ck_actor() / ck_clock_c() / ck_ensure_site() —
+# canonical implementations shared with claude-bus.sh, the transports and the CLI
+# entrypoints, so no two of them can resolve a different .claude-bus tree or mint
+# a different actor id. A missing common.sh means a broken install; exit 0 rather
+# than run on with an unresolvable root, per this script's never-wedge rule.
+# shellcheck source=./common.sh
+. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh" || exit 0
+
 slug() { printf '%s' "$1" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | cut -c1-48; }
 
 # ── input handling: hook phases read JSON on stdin; CLI phases take args ──────
@@ -101,9 +94,9 @@ curbr="$(branch_of "$cwd")"
 # events use the versioned v2 envelope (Phase 3). Both default off so a plugin
 # instance and a live global-hooks instance still converge on one ledger.jsonl.
 CK_LOGSTORE=0
-CK_DATA="${COORDKIT_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/coordkit-data}}"
-_ck_lib="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/transports/lib.sh"
-CK_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}"
+CK_DATA="$(ck_data_dir)"
+CK_PLUGIN_ROOT="$(ck_plugin_root)"
+_ck_lib="${CK_PLUGIN_ROOT}/transports/lib.sh"
 
 # ── per-repo TRUST gate (prompt-injection containment) ───────────────────────
 # A COMMITTED coord.toml can flip this repo into logstore mode, which makes the
@@ -189,29 +182,13 @@ ledger_emit() {  # append one prebuilt JSON line (logstore-aware)
   else printf '%s\n' "$1" >> "$LWRITE" 2>/dev/null; fi
 }
 
-_ck_actor() {
-  local f="${CK_DATA}/site.json" a
-  a="$(jq -r '.actor // empty' "$f" 2>/dev/null)"
-  [ -n "$a" ] && { printf '%s' "$a"; return; }
-  local seed="${HOSTNAME:-host}-${USER:-user}-${HOME:-/}" h
-  if command -v b3sum >/dev/null 2>&1; then h="$(printf '%s' "$seed" | b3sum 2>/dev/null | cut -c1-8)"
-  else h="$(printf '%s' "$seed" | sha256sum 2>/dev/null | cut -c1-8)"; fi
-  printf 'site-%s' "${h:-00000000}"
-}
-_ck_clock_c() {
-  local f="${CK_DATA}/clock.state" c
-  mkdir -p "$CK_DATA" 2>/dev/null
-  ( flock 8
-    c="$(cat "$f" 2>/dev/null)"; [ -z "$c" ] && c=0; c=$(( c + 1 )); printf '%s' "$c" > "$f"; printf '%s' "$c"
-  ) 8>"${f}.lock"
-}
 _ck_emit_v2() {  # seq type subject body refs tags lease -> one v2 JSON line on stdout
   local seq="$1" type="$2" subject="$3" body="$4" refs="$5" tags="$6" lease="$7"
   local actor p c lease_obj base eid id hasher="sha256" hcmd="sha256sum"
   command -v b3sum >/dev/null 2>&1 && { hasher="blake3"; hcmd="b3sum"; }
-  actor="$(_ck_actor)"
+  actor="$(ck_actor)"
   p="$(date +%s%3N 2>/dev/null)"; case "$p" in *[!0-9]*|'') p="$(( $(now) * 1000 ))";; esac
-  c="$(_ck_clock_c)"
+  c="$(ck_clock_c)"
   if [ "${lease:-0}" = 0 ] || [ -z "${lease:-}" ]; then lease_obj='null'
   else lease_obj="$(jq -nc --argjson l "$lease" --arg owner "$actor" --arg sid8 "$sid8" \
         'if ($l|type)=="object" then $l else {until:$l, owner:$owner, sid8:$sid8} end' 2>/dev/null)"; fi
@@ -224,24 +201,6 @@ _ck_emit_v2() {  # seq type subject body refs tags lease -> one v2 JSON line on 
     '{schema_version:$sv,eid:"",id:$id,actor:$actor,clock:{p:$p,c:$c},seq:$seq,ts:$ts,sid:$sid,sid8:$sid8,user:$user,branch:$br,type:$type,subject:$subject,body:$body,refs:$refs,tags:$tags,lease:$lease,supersedes:null,sig:null}' 2>/dev/null)"
   eid="${hasher}:$(printf '%s' "$base" | jq -Sc 'del(.eid,.sig)' 2>/dev/null | "$hcmd" 2>/dev/null | cut -d' ' -f1 | cut -c1-32)"
   printf '%s' "$base" | jq -c --arg eid "$eid" '.eid=$eid' 2>/dev/null
-}
-
-# ensure a STABLE per-(machine+user+clone) actor identity in the persistent
-# plugin data dir. This is bootstrap.sh's essential work, inlined here so the
-# ledger is SELF-bootstrapping (bootstrap.sh is not wired into any hook). Cheap
-# and idempotent: a single jq validation once the file exists, a no-op after the
-# first successful write. Best-effort — never fails ensure_dirs.
-ensure_site() {
-  local site="${CK_DATA}/site.json" seed h actor
-  [ -s "$site" ] && jq -e '.actor' "$site" >/dev/null 2>&1 && return 0
-  mkdir -p "$CK_DATA" 2>/dev/null || return 0
-  seed="${HOSTNAME:-$(hostname 2>/dev/null || echo host)}-${USER:-$(id -un 2>/dev/null || echo user)}-${HOME:-/}"
-  if command -v b3sum >/dev/null 2>&1; then h="$(printf '%s' "$seed" | b3sum 2>/dev/null | cut -c1-8)"
-  else h="$(printf '%s' "$seed" | sha256sum 2>/dev/null | cut -c1-8)"; fi
-  actor="site-${h:-00000000}"
-  jq -nc --arg actor "$actor" --arg user "${USER:-}" --arg host "${HOSTNAME:-}" \
-    '{actor:$actor, user:$user, host:$host}' > "$site" 2>/dev/null || return 0
-  return 0
 }
 
 # cursors/<sid>.json is written by THIS script and, unlike agents/ and claims/
@@ -270,7 +229,7 @@ ensure_dirs() {
   mkdir -p "$agents" "$cursors" 2>/dev/null || return 1
   [ -f "${bus}/.gitignore" ] || printf '*\n' > "${bus}/.gitignore" 2>/dev/null
   [ -f "$LWRITE" ] || : > "$LWRITE" 2>/dev/null
-  ensure_site   # self-bootstrap the stable actor id (best-effort, no-op once done)
+  ck_ensure_site  # self-bootstrap the stable actor id (shared; best-effort, no-op once done)
   prune_cursors # best-effort reaper for dead sessions' cursors
   return 0
 }

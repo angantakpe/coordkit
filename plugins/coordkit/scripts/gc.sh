@@ -50,20 +50,10 @@ done
 
 case "$KEEP" in ''|*[!0-9]*) echo "gc: --keep must be a number" >&2; exit 2 ;; esac
 
-# Root resolution mirrors claude-bus.sh's resolve_root().
-resolve_root() {
-  local cwd="$1" top dir
-  if [ -n "${CLAUDE_BUS_ROOT:-}" ]; then printf '%s' "$CLAUDE_BUS_ROOT"; return; fi
-  top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
-  if [ -n "$top" ]; then printf '%s' "$top"; return; fi
-  dir="$cwd"
-  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-    [ -d "$dir/.claude-bus" ] && { printf '%s' "$dir"; return; }
-    dir="$(dirname "$dir")"
-  done
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return; fi
-  printf '%s' "$cwd"
-}
+# Root resolution comes from the shared library, so gc collects exactly the bus
+# claude-bus.sh writes.
+# shellcheck source=./common.sh
+. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh"
 
 root="$(resolve_root "${REPO:-$PWD}")"
 bus="${root}/.claude-bus"

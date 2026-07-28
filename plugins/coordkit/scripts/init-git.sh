@@ -26,13 +26,19 @@
 #   remote   git remote name/URL that carries the log (default: repo's existing remote)
 set -uo pipefail
 
-ROOT_PLUGIN="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}"
+# shellcheck source=./common.sh
+. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh"
+
+ROOT_PLUGIN="$(ck_plugin_root)"
 TPL="${ROOT_PLUGIN}/templates"
 SCHEMA="${ROOT_PLUGIN}/schema"
 room="${1:-default}"
 remote="${2:-}"
 
-# must be inside a git repo (git mode replicates over a git remote)
+# Must be inside a git repo (git mode replicates over a git remote). This is
+# deliberately NOT the shared resolve_root(): that one honours CLAUDE_BUS_ROOT
+# verbatim and falls back to a non-git cwd, whereas git mode needs the true git
+# toplevel and must HARD-FAIL when there isn't one.
 repo="$(git -C "${CLAUDE_BUS_ROOT:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || {
   echo "coordkit init-git: not inside a git repo. git mode needs a git remote." >&2
   echo "  cd into your project repo first (or 'git init'), then re-run." >&2

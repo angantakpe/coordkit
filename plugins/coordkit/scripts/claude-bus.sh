@@ -52,30 +52,15 @@ iso()  { date '+%Y-%m-%d %H:%M:%S'; }
 hhmm() { date '+%H:%M:%S'; }
 mtime(){ stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 
-resolve_root() {
-  local cwd="$1" top dir
-  # explicit pin wins over everything — lets sibling non-git subdirs share one bus
-  if [ -n "${CLAUDE_BUS_ROOT:-}" ]; then printf '%s' "$CLAUDE_BUS_ROOT"; return; fi
-  top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
-  if [ -n "$top" ]; then printf '%s' "$top"; return; fi
-  dir="$cwd"
-  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-    [ -d "$dir/.claude-bus" ] && { printf '%s' "$dir"; return; }
-    dir="$(dirname "$dir")"
-  done
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return; fi
-  printf '%s' "$cwd"
-}
-# Prints the branch name, or a sentinel that never matches a real branch:
-#   no-git    -> not a git work tree (git command failed)
-#   detached  -> detached HEAD (git prints empty on exit 0)
-# Same-branch collision checks must treat both sentinels (and empty) as
-# never-matching, otherwise two detached-HEAD instances look like a collision.
-branch_of() {
-  local b
-  b="$(git -C "$1" branch --show-current 2>/dev/null)" || { printf 'no-git'; return; }
-  if [ -n "$b" ]; then printf '%s' "$b"; else printf 'detached'; fi
-}
+# resolve_root() / branch_of() — canonical implementations, shared with the
+# ledger, the transports and the CLI entrypoints so no two of them can ever
+# resolve a different .claude-bus tree. Plugin runtime injects
+# CLAUDE_PLUGIN_ROOT; the fallback keeps a direct `bash scripts/claude-bus.sh`
+# invocation working from a repo checkout.
+# A missing common.sh means a broken install; exit 0 rather than run on with an
+# unresolvable root, per this script's never-wedge-a-session rule.
+# shellcheck source=./common.sh
+. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh" || exit 0
 
 # ── input handling ──────────────────────────────────────────────────────────
 # dashboard/watch take a repo arg; everything else reads hook/statusline JSON.

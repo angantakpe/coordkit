@@ -22,7 +22,7 @@ It ships **three plugins**, deliberately kept separate:
 
 | Plugin               | Version | Contract                               | What it does                                                                                                                                                                                                                                                                                                       |
 | -------------------- | ------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **coordkit**   | 2.2.0   | **WARN-only — never blocks**    | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other.                                                                                                      |
+| **coordkit**   | 2.2.1   | **WARN-only — never blocks**    | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other.                                                                                                      |
 | **coordguard** | 1.2.0   | **HARD blocker**                 | An anti-clobber guard. On`Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it.                                                                                                                |
 | **skillkit**   | 1.0.2   | **Suggest-only — never blocks** | Skill auto-activation. On every prompt it matches layered`skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
 
@@ -46,7 +46,7 @@ own axis:
 
 1. **Distribution / packaging** *(this README, the marketplace, plugin manifests,
    hook wiring)* — how the system is installed, versioned, and updated. The
-   coordkit `version` (currently `2.2.0`) is the tooling-version axis.
+   coordkit `version` (currently `2.2.1`) is the tooling-version axis.
 2. **Schema** *(`plugins/coordkit/schema/`)* — the versioned event envelope
    plus its JSON Schema, manifest, and migrations. The envelope version is
    configurable and the ledger accepts either version on read; this is the

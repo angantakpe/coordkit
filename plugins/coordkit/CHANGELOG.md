@@ -8,6 +8,18 @@ ship an update to installed users.
 coordguard is a separate plugin on its own version axis — its entries live in
 `plugins/coordguard/CHANGELOG.md`.
 
+## 2.2.1
+
+### Changed
+- **Extracted `scripts/common.sh`.** `resolve_root()`, `branch_of()`, and the
+  actor-identity helpers (`ck_actor`/`ck_clock_c`/`ck_ensure_site`) were
+  hand-copied across `claude-bus.sh`, `claude-ledger.sh`, `transports/lib.sh`,
+  `bin/sync.sh`, `scripts/init-git.sh`, `scripts/migrate.sh`, `scripts/gc.sh`,
+  and `scripts/bootstrap.sh` — 7+ independent copies that could (and once did,
+  see 2.1.1's trust-gate work) silently drift from each other, splitting the
+  coordination state across two different `.claude-bus` trees. Every entrypoint
+  now sources one canonical implementation. Pure refactor — no behavior change.
+
 ## 2.2.0
 
 Adds the missing lifecycle command, and makes the event schema describe what is

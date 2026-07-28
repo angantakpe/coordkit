@@ -36,6 +36,12 @@ fi
 
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}"
 LIB="${ROOT}/transports/lib.sh"
+COMMON="${ROOT}/scripts/common.sh"
+
+# resolve_root() comes from the shared library, so the repo this sync's
+# debounce/lock markers guard is exactly the repo the transport will replicate.
+# shellcheck source=../scripts/common.sh
+[ -f "$COMMON" ] && . "$COMMON"
 
 # No git transport installed → nothing to sync; succeed silently.
 [ -f "$LIB" ] || exit 0
@@ -43,25 +49,7 @@ LIB="${ROOT}/transports/lib.sh"
 DEBOUNCE="${COORDKIT_SYNC_DEBOUNCE:-10}"
 SYNC_TIMEOUT="${COORDKIT_SYNC_TIMEOUT:-30}"
 
-# Resolve the repo root the SAME way lib.sh's __logstore_repo_root does — including
-# the CLAUDE_PROJECT_DIR tier — so our debounce/lock markers guard exactly the repo
-# the transport will replicate (a mismatch would let the lock/debounce guard a
-# different repo than the one synced).
-resolve_root() {
-  local cwd="$PWD" top dir
-  if [ -n "${CLAUDE_BUS_ROOT:-}" ];    then printf '%s' "$CLAUDE_BUS_ROOT";    return; fi
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return; fi
-  top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
-  if [ -n "$top" ]; then printf '%s' "$top"; return; fi
-  dir="$cwd"
-  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-    [ -d "$dir/.claude-bus" ] && { printf '%s' "$dir"; return; }
-    dir="$(dirname "$dir")"
-  done
-  printf '%s' "$cwd"
-}
-
-repo="$(resolve_root)"
+repo="$(resolve_root "$PWD")"
 state="${repo}/.claude-bus"
 if ! mkdir -p "$state" 2>/dev/null; then
   # Fallback must stay scoped per-user AND per-repo — a bare ${TMPDIR:-/tmp} would make

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "coordkit",
   "displayName": "coordkit",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Same-machine multi-instance coordination for Claude Code: a per-repo bus + cross-instance ledger that tracks who else is live and which files they touch, and surfaces it. WARN-only by design — these hooks never block a tool call.",
   "author": {
     "name": "codehornets",
