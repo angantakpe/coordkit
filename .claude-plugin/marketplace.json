@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
-  "name": "coordkit-marketplace",
+  "name": "coordkit",
   "owner": {
     "name": "codehornets",
     "email": "codehornets@gmail.com"

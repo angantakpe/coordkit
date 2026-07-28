@@ -5,7 +5,7 @@ Skill auto-activation + orchestration toolkit for Claude Code. Solves the
 matches every prompt against `skill-rules.json` trigger definitions and
 injects a "use this skill BEFORE responding" reminder into the turn's context.
 
-Ported into the coordkit-marketplace from
+Ported into coordkit (the marketplace) from
 [claude-code-infrastructure-showcase](https://github.com/codehornets/claude-code-infrastructure-showcase)
 with two changes:
 
@@ -58,7 +58,7 @@ you to ignore the reminders.
 ## Install
 
 ```bash
-/plugin install skillkit@coordkit-marketplace
+/plugin install skillkit@coordkit
 ```
 
 Then create your global rules file:

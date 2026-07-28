@@ -1,26 +1,30 @@
-# coordkit-marketplace
+# coordkit
 
-A Claude Code plugin marketplace that packages a working **same-machine,
+A Claude Code plugin **marketplace** that packages a working **same-machine,
 multi-instance coordination system** so it becomes installable, shareable, and
 semver-versioned instead of a hand-wired set of `~/.claude/hooks/*.sh` scripts.
+(The repo/marketplace is named `coordkit` after its flagship plugin — see the
+scope note below for why that's an imperfect fit now that it also ships
+`coordguard` and `skillkit`.)
 
 ## Scope note
 
-`skillkit` is bundled in this marketplace for convenience, but it is
-functionally unrelated to what the repo is named for: coordkit and coordguard
-are two halves of one coordination story, while skillkit is skill
-auto-activation and shares no concepts, state, or hooks with them. Splitting it
-into its own marketplace — or renaming this repo to something scope-neutral —
-is worth doing as more unrelated plugins land here. **Flagged, not yet acted
-on.**
+This repo was renamed from `coordkit-marketplace` to `coordkit` — shorter, but
+it now literally collides with the name of one specific plugin it ships
+(`coordkit`, one of three). `skillkit` is bundled here for convenience, but it
+is functionally unrelated: `coordkit`/`coordguard` are two halves of one
+coordination story, while `skillkit` is skill auto-activation and shares no
+concepts, state, or hooks with them. Splitting `skillkit` into its own
+marketplace is worth doing as more unrelated plugins land here. **Flagged, not
+yet acted on.**
 
 It ships **three plugins**, deliberately kept separate:
 
-| Plugin | Version | Contract | What it does |
-| --- | --- | --- | --- |
-| **coordkit** | 2.2.0 | **WARN-only — never blocks** | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other. |
-| **coordguard** | 1.2.0 | **HARD blocker** | An anti-clobber guard. On `Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it. |
-| **skillkit** | 1.0.2 | **Suggest-only — never blocks** | Skill auto-activation. On every prompt it matches layered `skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
+| Plugin               | Version | Contract                               | What it does                                                                                                                                                                                                                                                                                                       |
+| -------------------- | ------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **coordkit**   | 2.2.0   | **WARN-only — never blocks**    | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other.                                                                                                      |
+| **coordguard** | 1.2.0   | **HARD blocker**                 | An anti-clobber guard. On`Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it.                                                                                                                |
+| **skillkit**   | 1.0.2   | **Suggest-only — never blocks** | Skill auto-activation. On every prompt it matches layered`skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
 
 ## Why coordkit and coordguard are split
 
@@ -57,28 +61,28 @@ Add the marketplace, then install the plugin(s):
 
 ```bash
 # From a hosted git remote (GitHub/GitLab/git URL):
-/plugin marketplace add <owner>/coordkit-marketplace
+/plugin marketplace add <owner>/coordkit
 # ...or from a local clone:
-/plugin marketplace add ./coordkit-marketplace
+/plugin marketplace add ./coordkit
 
 # Always-on, zero-risk coordination:
-/plugin install coordkit@coordkit-marketplace
+/plugin install coordkit@coordkit
 
 # Optional hard anti-clobber guard:
-/plugin install coordguard@coordkit-marketplace
+/plugin install coordguard@coordkit
 
 # Skill auto-activation + agents + dev-docs:
-/plugin install skillkit@coordkit-marketplace
+/plugin install skillkit@coordkit
 ```
 
 > **Distribution reality check.** As currently configured this repo's only
-> remote is **private** (`git@github.com:angantakpe/coordkit-marketplace.git`),
-> so the hosted `/plugin marketplace add <owner>/coordkit-marketplace` form
+> remote is **private** (`git@github.com:angantakpe/coordkit.git`),
+> so the hosted `/plugin marketplace add <owner>/coordkit` form
 > works **only for the repo owner and anyone explicitly granted access** — for
 > everyone else it fails at clone time. Genuinely shareable distribution needs
 > either making the repo public or documenting an access-request path; neither
 > has been done. Until then, the local-clone form
-> (`/plugin marketplace add ./coordkit-marketplace`) is the path that works for
+> (`/plugin marketplace add ./coordkit`) is the path that works for
 > anyone who has the files.
 
 After installing skillkit, seed your global rules file (see
@@ -105,24 +109,24 @@ Updates ship by bumping the plugin `version`; users pull them with
 **coordkit** registers five lifecycle hooks (all invoked via
 `${CLAUDE_PLUGIN_ROOT}` so the install location doesn't matter):
 
-| Event | Matcher | Invocation |
-| --- | --- | --- |
-| `SessionStart` | — | `claude-bus.sh start`, `claude-ledger.sh start` |
-| `UserPromptSubmit` | — | `claude-bus.sh task`, `claude-ledger.sh prompt` |
-| `PreToolUse` | `Write\|Edit` | `claude-bus.sh check` |
-| `PostToolUse` | `Write\|Edit\|Read\|Bash` | `claude-bus.sh record` |
-| `SessionEnd` | — | `claude-bus.sh stop` (end-of-session cleanup) |
+| Event                | Matcher                  | Invocation                                          |
+| -------------------- | ------------------------ | --------------------------------------------------- |
+| `SessionStart`     | —                       | `claude-bus.sh start`, `claude-ledger.sh start` |
+| `UserPromptSubmit` | —                       | `claude-bus.sh task`, `claude-ledger.sh prompt` |
+| `PreToolUse`       | `Write\|Edit`           | `claude-bus.sh check`                             |
+| `PostToolUse`      | `Write\|Edit\|Read\|Bash` | `claude-bus.sh record`                            |
+| `SessionEnd`       | —                       | `claude-bus.sh stop` (end-of-session cleanup)     |
 
 **coordguard** registers the blocker (and the companion record phase it needs to
 avoid blocking on files this session legitimately read):
 
-| Event | Matcher | Invocation |
-| --- | --- | --- |
-| `PreToolUse` | `Write\|Edit` | `concurrency-guard.sh check` (can return a `deny`) |
-| `PreToolUse` | `Bash` | `concurrency-guard.sh snapshot` (fingerprint tracked files) |
-| `PostToolUse` | `Read\|Write\|Edit` | `concurrency-guard.sh record` |
-| `PostToolUse` | `Bash` | `concurrency-guard.sh absorb` (re-stamp self-inflicted changes) |
-| `SessionEnd` | — | `concurrency-guard.sh cleanup` (end-of-session cleanup) |
+| Event           | Matcher             | Invocation                                                        |
+| --------------- | ------------------- | ----------------------------------------------------------------- |
+| `PreToolUse`  | `Write\|Edit`      | `concurrency-guard.sh check` (can return a `deny`)            |
+| `PreToolUse`  | `Bash`            | `concurrency-guard.sh snapshot` (fingerprint tracked files)     |
+| `PostToolUse` | `Read\|Write\|Edit` | `concurrency-guard.sh record`                                   |
+| `PostToolUse` | `Bash`            | `concurrency-guard.sh absorb` (re-stamp self-inflicted changes) |
+| `SessionEnd`  | —                  | `concurrency-guard.sh cleanup` (end-of-session cleanup)         |
 
 The `snapshot`/`absorb` pair brackets every Bash call so files modified by this
 session's **own** shell commands (`sed -i`, formatters, `git checkout`) don't

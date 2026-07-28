@@ -10,8 +10,8 @@
 #
 # Both files use the same schema; a project entry overrides the global entry
 # of the same skill name. Matching is suggest-only: stdout is injected as
-# context for the turn. This hook never blocks anything (coordkit-marketplace
-# WARN-only philosophy).
+# context for the turn. This hook never blocks anything (coordkit's WARN-only
+# philosophy).
 #
 # skill-rules.json shape (per skill):
 #   {
