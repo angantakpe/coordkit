@@ -3,6 +3,13 @@
 All notable changes to **skillkit** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## 1.0.2
+
+### Fixed
+- **Hook has no timeout bound.** `hooks/hooks.json`'s `UserPromptSubmit` hook
+  (`skill-activation.sh`) had no `timeout`, so a slow jq or a wedged process
+  could stall every prompt indefinitely. Added `"timeout": 5`.
+
 ## 1.0.1
 
 ### Fixed

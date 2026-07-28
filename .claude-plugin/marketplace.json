@@ -11,7 +11,7 @@
       "name": "skillkit",
       "source": "./plugins/skillkit",
       "description": "Skill auto-activation: a UserPromptSubmit hook matches prompts against layered skill-rules.json files (global ~/.claude/skills + per-project) and injects 'use this skill' reminders. Ships 10 specialized agents, /dev-docs context-persistence commands, and the skill-developer meta-skill. Suggest-only — never blocks.",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"
