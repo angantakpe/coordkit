@@ -26,7 +26,7 @@ if [ -f "${SCHEMA_DIR}/MANIFEST.json" ]; then
   cp -n "${SCHEMA_DIR}/MANIFEST.json" "${bus}/MANIFEST.json" 2>/dev/null || true
 fi
 
-# robust max seq — mirrors claude-ledger.sh's max_seq so a corrupt / seq-less
+# robust max seq — mirrors ledger.sh's max_seq so a corrupt / seq-less
 # LAST line can never reset the sequence to 0 (which would blind every downstream
 # `select(.seq > N)` cursor).
 mig_max_seq() {
@@ -54,7 +54,7 @@ if grep -q "schema-upgrade" "$ledger" 2>/dev/null && \
   exit 0
 fi
 
-# Allocate seq = max+1 and append under the SAME lock discipline claude-ledger.sh's
+# Allocate seq = max+1 and append under the SAME lock discipline ledger.sh's
 # direct-mode append_event uses (flock on .ledger.lock, fd 9), so a concurrent
 # migrate and a concurrent event can't mint the same seq. The marker is a fully
 # schema-conformant v2 line (note + schema_version + eid + id + actor + clock),

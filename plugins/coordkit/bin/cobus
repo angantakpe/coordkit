@@ -20,7 +20,7 @@ if command -v readlink >/dev/null 2>&1; then
 fi
 
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}"
-LEDGER="${ROOT}/scripts/claude-ledger.sh"
+LEDGER="${ROOT}/scripts/ledger.sh"
 
 usage() {
   cat <<'EOF'

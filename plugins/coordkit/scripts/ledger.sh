@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# claude-ledger.sh — v2 SHARED CONTEXT layer for multi-instance Claude Code.
+# shellcheck shell=bash
+# ledger.sh — v2 SHARED CONTEXT layer for multi-instance Claude Code.
 #
-# Sits ON TOP of claude-bus.sh (the awareness layer) and reuses its per-repo
+# Sits ON TOP of bus.sh (the awareness layer) and reuses its per-repo
 # heartbeats (<repo>/.claude-bus/agents/<sid>.json) for liveness. Where the bus
 # RECORDS who's live and WARNS on collisions, the ledger gives the instances a
 # single append-only source of truth they all read paginated slices out of, plus
@@ -23,7 +24,7 @@
 #   A claim whose lease expired OR whose owner's heartbeat is dead reverts the
 #   task to OPEN automatically → work-stealing, no leader needed.
 #
-# THIS is the one task queue in coordkit — claude-bus.sh's `/claim`/`/tasks`/
+# THIS is the one task queue in coordkit — bus.sh's `/claim`/`/tasks`/
 # `done` are a thin free-text front-end over it (task+claim in one step, and a
 # literal-substring `done-text` lookup instead of an exact subject), not a
 # second system. See docs/LEDGER.md's "Two task systems" section for the
@@ -35,9 +36,19 @@
 #   + only the events newer than this instance's cursor, capped to a page.
 #   Cursor then advances so the next turn shows only what's new.
 #
-# Wired from settings.json (ADDITIVE — alongside claude-bus.sh):
+# Reached from hooks through scripts/coord.sh, the single dispatcher, which
+# SOURCES this file and calls ledger_run (after the bus's own phase):
 #   SessionStart      -> start    register cursor + inject digest
 #   UserPromptSubmit  -> prompt   inject delta since cursor + advance
+#
+# SOURCING CONTRACT — the phase dispatch lives in ledger_main(), whose internals
+# are deliberately untouched and still use `exit` for control flow. Callers use
+# ledger_run, which runs ledger_main in a SUBSHELL so those exits (and its EXIT
+# trap, which reaps the .lview/.tproj temp files) terminate the phase, not the
+# caller's session:
+#   . ledger.sh ; ledger_run prompt <<<"$hook_json"
+# Executing the file directly still works exactly as before.
+#
 # By hand / slash commands (/led, /ctx):
 #   digest|catchup    full paginated digest      board   task board
 #   note|decide|ask|answer|task|claim|next|done|block   write events
@@ -48,6 +59,11 @@
 #
 # Defensive: any internal trouble -> exit 0 so it can never wedge a session.
 set -uo pipefail
+
+[ -n "${_CK_LEDGER_SH:-}" ] && return 0 2>/dev/null
+_CK_LEDGER_SH=1
+
+ledger_main() {
 
 phase="${1:-digest}"
 
@@ -62,13 +78,13 @@ now()  { date +%s; }
 iso()  { date '+%Y-%m-%d %H:%M:%S'; }
 
 # resolve_root() / branch_of() / ck_actor() / ck_clock_c() / ck_ensure_site() —
-# canonical implementations shared with claude-bus.sh, the transports and the CLI
+# canonical implementations shared with bus.sh, the transports and the CLI
 # entrypoints, so no two of them can resolve a different .claude-bus tree or mint
 # a different actor id. A missing common.sh means a broken install; exit 0 rather
 # than run on with an unresolvable root, per this script's never-wedge rule.
 # shellcheck source=./common.sh
 . "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh" || exit 0
-# slug() now lives in common.sh — claude-bus.sh needs the identical transform
+# slug() now lives in common.sh — bus.sh needs the identical transform
 # to compute a task's subject without parsing this script's stdout.
 
 # ── input handling: hook phases read JSON on stdin; CLI phases take args ──────
@@ -149,10 +165,22 @@ _ck_trust_write() {  # $1 = add|del
 # NO env var. With no toml + no env → stays direct (byte-identical to today).
 _ck_want=0
 CK_UNTRUSTED_SHARE=0
+CK_MODE_TYPO=0
+CK_MODE_TYPO_VALUE=""
 [ "${COORDKIT_USE_LOGSTORE:-0}" = 1 ] && _ck_want=1
 if [ "$_ck_want" = 0 ]; then
   _ck_m="${COORDKIT_MODE:-}"
   _ck_from_toml=0
+  # An unrecognized COORDKIT_MODE (e.g. a typo like "gti") is not a valid
+  # transport override. Letting it through here would silently mask a
+  # committed coord.toml's real mode=git/relay and drop to local-only with no
+  # signal why. Treat anything but the three real transports as unset for
+  # override purposes, fall through to read the toml below, and flag it for
+  # a one-line advisory (same pattern as CK_UNTRUSTED_SHARE above).
+  case "$_ck_m" in
+    ""|local|git|relay) : ;;
+    *) CK_MODE_TYPO=1; CK_MODE_TYPO_VALUE="$_ck_m"; _ck_m="" ;;
+  esac
   if [ -z "$_ck_m" ]; then
     _ck_toml="${COORDKIT_COORD_TOML:-${root}/.claude/coord/coord.toml}"
     [ -f "$_ck_toml" ] && _ck_m="$(sed -n '/^[[:space:]]*\[/q;p' "$_ck_toml" 2>/dev/null \
@@ -210,10 +238,10 @@ _ck_emit_v2() {  # seq type subject body refs tags lease -> one v2 JSON line on 
 }
 
 # cursors/<sid>.json is written by THIS script and, unlike agents/ and claims/
-# (pruned by claude-bus.sh), had no reaper — so it grew without bound. Drop any
+# (pruned by bus.sh), had no reaper — so it grew without bound. Drop any
 # cursor that is both older than LIVE_TTL and has no surviving bus heartbeat: the
 # session is long gone. The age guard matters because a cursor is written at
-# SessionStart, potentially before claude-bus.sh has registered the agent — a
+# SessionStart, potentially before bus.sh has registered the agent — a
 # missing-agent test alone could reap a live session's own cursor.
 CK_PRUNED=0
 prune_cursors() {
@@ -447,7 +475,7 @@ task_rows() {
 
 # ── BOARD: projected task queue ──────────────────────────────────────────────
 print_board() {
-  [ -s "$ledger" ] || { echo "📋 ledger empty — no tasks yet. Use: claude-ledger.sh task \"<desc>\""; return; }
+  [ -s "$ledger" ] || { echo "📋 ledger empty — no tasks yet. Use: ledger.sh task \"<desc>\""; return; }
   echo "📋 Task queue (projected from ledger) — ${root}"
   local s st desc found=0
   while IFS=$'\x1f' read -r s st desc; do
@@ -513,11 +541,21 @@ trust_notice() {
   printf '%s' "⚠️ This repo requests coordkit git-mode sharing (coord.toml mode=git) but hasn't been trusted on this machine. Run \`cobus trust\` to enable it. Falling back to local-only coordination."
 }
 
+# One-line advisory when COORDKIT_MODE held something other than local/git/relay
+# (unset counts as "not set", not a typo). Never fatal — the resolver already
+# fell through to coord.toml as if the env var weren't there.
+mode_typo_notice() {
+  [ "${CK_MODE_TYPO:-0}" = 1 ] || return 0
+  printf '%s' "⚠️ COORDKIT_MODE=\"${CK_MODE_TYPO_VALUE}\" isn't a recognized transport (local|git|relay) — ignoring it and falling back to coord.toml/local."
+}
+
 # ── DIGEST: the token-budgeted shared-context page ───────────────────────────
 build_digest() {  # $1 = cursor seq (events strictly greater are "new")
   local cur="${1:-0}" out="" tasks dec q delta n note
   ensure_dirs
   ensure_proj
+  note="$(mode_typo_notice)"
+  [ -n "$note" ] && out+="$note"$'\n'
   note="$(trust_notice)"
   [ -n "$note" ] && out+="$note"$'\n'
   [ -s "$ledger" ] || { printf '%s' "$out"; return; }
@@ -639,8 +677,9 @@ case "$phase" in
       printf '%s\n' "$DATA_FRAME"
       echo; printf '%s\n' "$dg"
     else
+      note="$(mode_typo_notice)"; [ -n "$note" ] && printf '%s\n' "$note"
       note="$(trust_notice)"; [ -n "$note" ] && printf '%s\n' "$note"
-      echo "🧠 Shared-context ledger is empty in ${root}. Seed it: claude-ledger.sh note \"...\""
+      echo "🧠 Shared-context ledger is empty in ${root}. Seed it: ledger.sh note \"...\""
     fi
     exit 0 ;;
 
@@ -737,7 +776,7 @@ case "$phase" in
   done)
     shift; subj="$(slug "${1:-}")"; [ -z "$subj" ] && { echo "usage: ... done <subject>"; exit 0; }
     s="$(append_event done "$subj" "done by ${sid8}")"; echo "✅ '${subj}' marked done (seq ${s})"; exit 0 ;;
-  # done-text "<substring>" — used by claude-bus.sh's `done` phase (the bus's
+  # done-text "<substring>" — used by bus.sh's `done` phase (the bus's
   # simpler UX takes free text to match, not a subject). Finds the first
   # NOT-done-and-not-blocked task whose description contains the text as a
   # literal fixed string (grep -F, matching the old TASKS.md behavior this
@@ -762,3 +801,16 @@ case "$phase" in
 
   *) echo "phases: start|prompt|digest|board|note|decide|ask|answer|task|claim|next|done|done-text|block|trust|distrust|compact"; exit 0 ;;
 esac
+
+}   # ── end ledger_main ─────────────────────────────────────────────────────
+
+# Public entrypoint for sourced callers (scripts/coord.sh). The subshell is what
+# makes ledger_main's `exit` statements and its EXIT trap safe in-process: both
+# scope to the phase, not the dispatcher.
+ledger_run() { ( ledger_main "$@" ); }
+
+# Executed directly (bash ledger.sh <phase>) rather than sourced: dispatch. No
+# subshell — the script IS the process, so `exit` means what it always did.
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  ledger_main "$@"
+fi

@@ -4,7 +4,7 @@
 # coordkit entrypoint needs: repo-root resolution, branch naming, the persistent
 # data dir, and this machine's stable actor identity.
 #
-# These four were previously hand-copied into claude-bus.sh, claude-ledger.sh,
+# These four were previously hand-copied into bus.sh, ledger.sh,
 # migrate.sh, gc.sh, bin/sync.sh, bootstrap.sh and transports/lib.sh. The copies
 # drifted (one branch_of returned "" on a detached HEAD where another returned
 # "detached"; one resolve_root ranked CLAUDE_PROJECT_DIR above the git toplevel),
@@ -76,11 +76,100 @@ branch_of() {
   if [ -n "$b" ]; then printf '%s' "$b"; else printf 'detached'; fi
 }
 
-# Deterministic subject slug from free text — the SAME transform claude-ledger.sh
-# uses for its task/decision/question subjects, so a caller (e.g. claude-bus.sh's
+# Deterministic subject slug from free text — the SAME transform ledger.sh
+# uses for its task/decision/question subjects, so a caller (e.g. bus.sh's
 # `claim`, which delegates to the ledger's task queue) can compute the identical
 # subject a "task <desc>" call will mint, without parsing the ledger's own stdout.
 slug() { printf '%s' "$1" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-' | cut -c1-48; }
+
+# --------------------------------------------------------------------------- #
+# ENFORCEMENT MODE — "warn" (default) or "guard".
+#
+# This is the ONE gate that decides whether coordkit is allowed to hard-block a
+# tool call. "warn" is coordkit's historical, shipped contract: the hooks observe
+# and advise, they never deny. "guard" additionally arms scripts/guard.sh's
+# anti-clobber deny (the former coordguard plugin). Nothing else in the codebase
+# may reach a `permissionDecision:"deny"` without going through here.
+#
+# This is a DIFFERENT axis from the TRANSPORT mode ("local"|"git"|"relay") that
+# transports/lib.sh's logstore_mode() resolves from COORDKIT_MODE and coord.toml's
+# TOP-LEVEL `mode` key. The two are kept strictly apart by name:
+#
+#   transport   COORDKIT_MODE          coord.toml top-level  mode = "git"
+#   enforcement COORDKIT_ENFORCEMENT   coord.toml            [enforcement]
+#                                                            mode = "guard"
+#
+# Enforcement lives in its own `[enforcement]` TABLE. That placement is load
+# bearing twice over: TOML forbids a bare `mode` key and a `[mode]` table sharing
+# a name (a strict parser would reject the whole file), and the flat top-level
+# reader in transports/lib.sh stops at the first `[`, so it never sees the
+# enforcement key and git-mode config keeps parsing exactly as before.
+#
+# Precedence: env COORDKIT_ENFORCEMENT > repo coord.toml [enforcement].mode >
+# per-user $(ck_data_dir)/config `enforcement=` > "warn". Values other than
+# guard/warn fall through to the next level rather than erroring.
+#
+# Reads only: no mkdir, no writes. /guard on|off (scripts/guard.sh) is the
+# writer.
+# --------------------------------------------------------------------------- #
+
+# Read `key = value` from inside a [table] of a TOML file. Quote handling mirrors
+# transports/lib.sh's flat __logstore_toml_get: a quoted value keeps a '#' inside
+# it, an unquoted one treats whitespace-then-'#' as an inline comment.
+ck_toml_table_get() {  # <file> <table> <key>
+  local file="$1" table="$2" key="$3" raw
+  [ -f "$file" ] || return 1
+  raw="$(awk -v tbl="$table" -v key="$key" '
+    { t = $0; sub(/^[ \t]+/, "", t)
+      if (t ~ /^\[/) {
+        h = t; sub(/^\[[ \t]*/, "", h); sub(/[ \t]*\].*$/, "", h)
+        intbl = (h == tbl); next
+      }
+      if (!intbl) next
+      if (t !~ "^" key "[ \t]*=") next
+      sub("^" key "[ \t]*=[ \t]*", "", t); print t; exit
+    }' "$file" 2>/dev/null)"
+  [ -n "$raw" ] || return 1
+  case "$raw" in
+    '"'*)  raw="${raw#\"}"; raw="${raw%%\"*}" ;;
+    "'"*)  raw="${raw#\'}"; raw="${raw%%\'*}" ;;
+    *)     raw="$(printf '%s' "$raw" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]*$//')" ;;
+  esac
+  printf '%s' "$raw"
+}
+
+# Resolve to "<mode>|<origin>" so a single pass answers both "which mode?" and
+# "which precedence level supplied it?" (what /guard status reports).
+_ck_enforcement_resolve() {
+  local v toml f
+  v="$(printf '%s' "${COORDKIT_ENFORCEMENT:-}" | tr '[:upper:]' '[:lower:]')"
+  case "$v" in
+    guard|warn) printf '%s|env COORDKIT_ENFORCEMENT' "$v"; return ;;
+  esac
+
+  toml="${COORDKIT_COORD_TOML:-$(resolve_root "$PWD")/.claude/coord/coord.toml}"
+  v="$(ck_toml_table_get "$toml" enforcement mode 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+  case "$v" in
+    guard|warn) printf '%s|repo %s' "$v" "$toml"; return ;;
+  esac
+
+  f="$(ck_data_dir)/config"
+  if [ -f "$f" ]; then
+    v="$(sed -n -E 's/^[[:space:]]*enforcement[[:space:]]*=[[:space:]]*//p' "$f" 2>/dev/null \
+         | tail -n1 | sed -E 's/[[:space:]]*#.*$//; s/[[:space:]]*$//' | tr -d "\"'" \
+         | tr '[:upper:]' '[:lower:]')"
+    case "$v" in
+      guard|warn) printf '%s|user %s' "$v" "$f"; return ;;
+    esac
+  fi
+
+  printf 'warn|default'
+}
+
+# THE gate. Prints "guard" or "warn"; anything unresolvable is "warn".
+ck_enforcement_mode()   { local r; r="$(_ck_enforcement_resolve)"; printf '%s' "${r%%|*}"; }
+# Which precedence level supplied the mode above (for /guard status).
+ck_enforcement_origin() { local r; r="$(_ck_enforcement_resolve)"; printf '%s' "${r#*|}"; }
 
 # --------------------------------------------------------------------------- #
 # Actor identity — ONE stable id per (machine + user + home), persisted in

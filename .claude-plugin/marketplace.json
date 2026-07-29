@@ -5,7 +5,7 @@
     "name": "codehornets",
     "email": "codehornets@gmail.com"
   },
-  "description": "Claude Code orchestration: a shared bus + ledger that warns about concurrent edits (coordkit), an optional hard anti-clobber blocker (coordguard), and skill auto-activation with agents and dev-docs (skillkit).",
+  "description": "Claude Code orchestration: a shared bus + ledger that warns about concurrent edits, with an opt-in hard anti-clobber guard built in (coordkit), and skill auto-activation with agents and dev-docs (skillkit). coordguard is a deprecated tombstone — its guard now ships inside coordkit.",
   "plugins": [
     {
       "name": "skillkit",
@@ -29,8 +29,8 @@
     {
       "name": "coordkit",
       "source": "./plugins/coordkit",
-      "description": "Same-machine coordination bus + cross-instance ledger. WARN-only: tracks who else is live in a repo and which files they touch, and surfaces it — never blocks a tool call.",
-      "version": "2.3.0",
+      "description": "Same-machine coordination bus + cross-instance ledger, plus an opt-in hard anti-clobber guard (merged in from coordguard). WARN-only by default: tracks who else is live in a repo and which files they touch, and surfaces it — never blocks a tool call. Run /guard on to enable guard mode, which additionally denies a Write/Edit when the target file changed on disk since this session last read it — the signature of a sibling instance's edit.",
+      "version": "3.0.0",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"
@@ -41,6 +41,8 @@
         "concurrency",
         "bus",
         "ledger",
+        "guard",
+        "anti-clobber",
         "hooks"
       ],
       "category": "workflow"
@@ -48,13 +50,14 @@
     {
       "name": "coordguard",
       "source": "./plugins/coordguard",
-      "description": "Hard anti-clobber guard. Blocks a Write/Edit when a file changed on disk since this session last saw it (a sibling Claude instance likely edited it). Bash calls are fingerprint-bracketed so this session's own shell edits (sed -i, formatters) don't false-positive. Kept separate from coordkit so the bus stays strictly never-blocks.",
-      "version": "1.2.0",
+      "description": "DEPRECATED — as of coordkit 3.0.0 this plugin's anti-clobber guard was merged into coordkit as an opt-in guard mode. Installing this version gets you no enforcement: it only prints a one-time deprecation notice pointing at /guard on in coordkit. Nothing to install here for functionality — uninstall it once you've switched.",
+      "version": "2.0.0",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"
       },
       "keywords": [
+        "deprecated",
         "coordination",
         "concurrency",
         "guard",

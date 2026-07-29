@@ -2,13 +2,14 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "coordguard",
   "displayName": "coordguard",
-  "version": "1.2.0",
-  "description": "Hard anti-clobber guard for multi-instance Claude Code. On Write/Edit it blocks (PreToolUse deny) when the target file changed on disk since this session last read it — the signature of another Claude instance editing the same file. Kept separate from coordkit so the bus stays strictly never-blocks. Files this session modifies via its own Bash commands (sed -i, formatters, git checkout) no longer trip the guard: every Bash call is bracketed by a fingerprint snapshot/absorb pair, so self-inflicted changes are auto-attributed while a sibling's earlier edit still denies.",
+  "version": "2.0.0",
+  "description": "DEPRECATED. This plugin's hard anti-clobber guard was merged into coordkit v3.0.0+, where it lives on as an opt-in mode — run /guard on in coordkit to get the same Write/Edit blocking. This package now installs no enforcement hooks at all; it ships only a one-time SessionStart deprecation notice. Uninstall it once you've switched.",
   "author": {
     "name": "codehornets",
     "email": "codehornets@gmail.com"
   },
   "keywords": [
+    "deprecated",
     "coordination",
     "concurrency",
     "guard",

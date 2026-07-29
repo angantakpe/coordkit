@@ -1,7 +1,7 @@
 ---
 description: Write to / drive the shared cross-instance ledger — note, decide, ask, answer, task, claim, next, done, block, board
 argument-hint: <note|decide|ask|answer|task|claim|next|done|block|board> [subject] [text]
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ledger.sh:*)
 ---
 
 Run the ledger subcommand I asked for against this repo's shared context, then confirm the result.
@@ -12,7 +12,7 @@ $ARGUMENTS
 
 Invoke it by calling the Bash tool with:
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh <subcommand> [subject] '<free text>'`
+`${CLAUDE_PLUGIN_ROOT}/scripts/ledger.sh <subcommand> [subject] '<free text>'`
 
 Pass each fixed token — the subcommand, plus the `<subject>` for
 `decide`/`ask`/`answer`/`claim`/`done`/`block` — as its own argument, and pass

@@ -5,50 +5,138 @@ multi-instance coordination system** so it becomes installable, shareable, and
 semver-versioned instead of a hand-wired set of `~/.claude/hooks/*.sh` scripts.
 (The repo/marketplace is named `coordkit` after its flagship plugin — see the
 scope note below for why that's an imperfect fit now that it also ships
-`coordguard` and `skillkit`.)
+`skillkit`.)
 
 ## Scope note
 
 This repo was renamed from `coordkit-marketplace` to `coordkit` — shorter, but
 it now literally collides with the name of one specific plugin it ships
-(`coordkit`, one of three). `skillkit` is bundled here for convenience, but it
-is functionally unrelated: `coordkit`/`coordguard` are two halves of one
-coordination story, while `skillkit` is skill auto-activation and shares no
-concepts, state, or hooks with them. Splitting `skillkit` into its own
-marketplace is worth doing as more unrelated plugins land here. **Flagged, not
-yet acted on.**
+(`coordkit`). `skillkit` is bundled here for convenience, but it is
+functionally unrelated: `coordkit` is the entire coordination story, while
+`skillkit` is skill auto-activation and shares no concepts, state, or hooks
+with it. Splitting `skillkit` into its own marketplace is worth doing as more
+unrelated plugins land here. **Flagged, not yet acted on.**
 
-It ships **three plugins**, deliberately kept separate:
+It ships **two plugins**:
 
-| Plugin               | Version | Contract                               | What it does                                                                                                                                                                                                                                                                                                       |
-| -------------------- | ------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **coordkit**   | 2.3.0   | **WARN-only — never blocks**    | A per-repo bus + cross-instance ledger. Tracks who else is live in a repo and which files they touch, and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other.                                                                                                      |
-| **coordguard** | 1.2.0   | **HARD blocker**                 | An anti-clobber guard. On`Write`/`Edit` it *denies* the tool call when the target file changed on disk since this session last read it — the signature of another instance having edited it.                                                                                                                |
-| **skillkit**   | 1.0.2   | **Suggest-only — never blocks** | Skill auto-activation. On every prompt it matches layered`skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
+| Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
+| ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **coordkit** | 3.0.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard. Tracks who else is live in a repo and which files they touch and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other — and, where you ask for it, *denies* an edit that would clobber theirs. |
+| **skillkit** | 1.0.2   | **Suggest-only — never blocks**                            | Skill auto-activation. On every prompt it matches layered`skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
+
+> **`coordguard` is no longer a functional plugin.** Through 2.x, the hard
+> anti-clobber blocker shipped as a separate `coordguard` package you installed
+> alongside coordkit. As of coordkit **3.0.0** that blocker lives inside
+> coordkit as opt-in [guard mode](#enforcement-modes). The `coordguard`
+> package still exists at **v2.0.0**, but purely as a deprecation tombstone: it
+> registers no enforcement hooks, only a one-time `SessionStart` notice pointing
+> at `/guard on`. Uninstall it once you've migrated — see
+> [Install](#install).
 
 ## Documentation
 
-This README covers install/quickstart. For how the two coordination pieces
-actually work under the hood:
+This README covers install/quickstart. For how coordkit's pieces actually work
+under the hood:
 
 - **[docs/BUS.md](docs/BUS.md)** — the awareness layer: heartbeats, liveness,
   the age-aware collision warning, messaging, the statusline badge.
 - **[docs/LEDGER.md](docs/LEDGER.md)** — the shared-context layer: the
   event-sourcing model, the task queue (leases, auto-claim, work-stealing),
   pagination/digests, and the git-mode trust gate.
+- **[Enforcement modes](#enforcement-modes)** (below) — the guard layer: what
+  `warn` vs `guard` mode actually do, how the mode is resolved, and the honest
+  version of the safety story now that both live in one plugin.
 
-## Why coordkit and coordguard are split
+## Enforcement modes
 
-*(This section is about those two only — skillkit is a separate concern; see the
+*(This section is about coordkit only — skillkit is a separate concern; see the
 scope note above.)*
 
-coordkit's entire value is that it is **safe to always run**: it observes and
-reports, it never wedges a tool call. The moment a coordination layer can *block*
-edits, it stops being "always on, zero-risk." So the blocking behavior is carved
-out into **coordguard**, which you opt into only when you want a hard stop. Keep
-coordkit installed everywhere; add coordguard where you want the guardrail. This
-boundary is a contract, not a preference — please don't move blocking logic into
-coordkit.
+coordkit's default contract is unchanged from 2.x: it **observes and reports, it
+never wedges a tool call**. That's what makes it safe to leave installed
+everywhere, in every repo, forever. **Guard mode** is the opt-in exception: it
+adds a hard `deny` on `Write`/`Edit` when the target file changed on disk since
+this session last read it — the signature of another instance having edited it
+underneath you.
+
+| Mode                     | What happens on a `Write` / `Edit`                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`warn`** *(default)* | Never denies. You still get the bus's soft collision warning and a debounced desktop notification when a **live sibling session** holds a claim on that file. The edit proceeds. |
+| **`guard`**        | The above, **plus** a `deny` when the file's on-disk fingerprint (`mtime:size`) changed since this session last read it — whether or not any sibling is still alive. Re-`Read`, reconcile, then edit. |
+
+Note that these are two different questions, not one behavior with the volume
+turned up. The warning asks *"is a live sibling working in this file?"*; the deny
+asks *"did this file change under me?"* — which catches cases the warning cannot
+(a sibling that already exited, a `git pull`, an editor outside Claude), and
+misses cases the warning catches (a live sibling who hasn't written yet). Both
+run in guard mode, guard's check first. See
+[docs/BUS.md §8](docs/BUS.md#8-the-bus-and-guard-mode) for the side-by-side.
+
+### Resolving the mode
+
+`ck_enforcement_mode()` in `scripts/common.sh` resolves the active mode. First
+match wins:
+
+1. **`COORDKIT_ENFORCEMENT=guard|warn`** in the environment — per-shell, highest
+   priority, good for a one-off session.
+2. **`.claude/coord/coord.toml`** → `mode` inside the `[enforcement]` table —
+   per-repo and **committable**, so a team can opt an entire repository in for
+   everyone who clones it:
+
+   ```toml
+   [enforcement]
+   mode = "guard"
+   ```
+3. **`$(ck_data_dir)/config`** → `enforcement=guard` — per-user, applies across
+   every repo on this machine.
+4. **Default: `warn`.**
+
+`/guard on|off|status` writes level 2 and reports the currently resolved mode
+*plus which level supplied it* — so "why is this denying?" (or "why isn't it?")
+is always one command away rather than a hunt through three config sites.
+
+> **One nearby name to keep straight.** `coord.toml`'s **top-level** `mode` key
+> is a different setting entirely: it selects the ledger **transport**
+> (`local` / `git` / `relay`, see [docs/LEDGER.md](docs/LEDGER.md) §4), and
+> `COORDKIT_MODE` overrides *that*. Enforcement has its own variable and its own
+> table. A single `coord.toml` can carry both, answering unrelated questions:
+>
+> ```toml
+> mode = "git"      # transport: share the ledger over a git remote
+>
+> [enforcement]
+> mode = "guard"    # enforcement: deny edits that would clobber a sibling
+> ```
+
+### The honest version of the safety story
+
+Through 2.x, "coordkit never blocks" was a **structural** guarantee: coordkit
+could not block because the blocking code was not in the package. You opted in
+by installing a second plugin. That guarantee is now **weaker**. coordkit 3.0.0
+ships the deny path, and it is inert only because a config check says so.
+
+That's a real reduction, and it's worth being clear-eyed about rather than
+papering over. What stands in its place:
+
+- **The gate is one auditable early exit.** The mode check is the *first*
+  statement in guard's `check` phase — it returns a no-op unless
+  `ck_enforcement_mode()` resolved to `guard`. Verifying "this cannot deny in my
+  configuration" means reading one function, not reasoning about a whole
+  subsystem.
+- **Fail-open discipline is unchanged.** Any error inside the guard — missing
+  state, an unreadable file, a hashing tool that isn't installed — results in
+  *allowing* the tool call, never denying it. A guard that breaks degrades to
+  warn-only rather than wedging your session.
+- **The false-positive suppression is unchanged.** The `snapshot`/`absorb` pair
+  around Bash still keeps the session's own shell mutations from tripping a deny;
+  see [What gets wired](#what-gets-wired).
+
+And one property genuinely improved. Opting in used to require installing a
+second plugin *on every machine* — per-user state that a repository has no way to
+express. The `coord.toml` route is per-repo and committed, so "this repo is
+routinely edited by several agents at once and wants a hard guard" travels with
+the repository instead of depending on each teammate having independently
+installed the right thing.
 
 ## The three layers
 
@@ -57,7 +145,12 @@ own axis:
 
 1. **Distribution / packaging** *(this README, the marketplace, plugin manifests,
    hook wiring)* — how the system is installed, versioned, and updated. The
-   coordkit `version` (currently `2.3.0`) is the tooling-version axis.
+   coordkit `version` (currently `3.0.0`) is the tooling-version axis. The
+   2.3.0 → 3.0.0 major bump is a change on *this axis only* — folding coordguard
+   in changed the hook surface and the safety contract, and deliberately did not
+   touch layers 2 and 3. Guard mode keeps its own state and emits no events, so
+   the on-disk event format and the delivery mechanism are byte-identical to
+   2.3.0.
 2. **Schema** *(`plugins/coordkit/schema/`)* — the versioned event envelope
    plus its JSON Schema, manifest, and migrations. The envelope version is
    configurable and the ledger accepts either version on read; this is the
@@ -76,15 +169,17 @@ Add the marketplace, then install the plugin(s):
 # ...or from a local clone:
 /plugin marketplace add ./coordkit
 
-# Always-on, zero-risk coordination:
+# Coordination: always-on awareness, plus the opt-in hard guard.
 /plugin install coordkit@coordkit
-
-# Optional hard anti-clobber guard:
-/plugin install coordguard@coordkit
 
 # Skill auto-activation + agents + dev-docs:
 /plugin install skillkit@coordkit
 ```
+
+**One plugin covers both halves now.** Installing `coordkit` gives you the
+warn-only bus and ledger immediately; running `/guard on` inside a repo adds the
+hard anti-clobber guard *there*. There is no second plugin to install for full
+functionality.
 
 > **Distribution reality check.** As currently configured this repo's only
 > remote is **private** (`git@github.com:angantakpe/coordkit.git`),
@@ -103,6 +198,23 @@ After installing skillkit, seed your global rules file (see
 cp <plugin-root>/templates/skill-rules.example.json ~/.claude/skills/skill-rules.json
 ```
 
+### Migrating from 2.x + coordguard
+
+If you were running the two-plugin setup, uninstall the old blocker and turn
+guard mode on in the repos that relied on it:
+
+```bash
+/plugin uninstall coordguard@coordkit
+/guard on          # run inside each repo that wants the hard guard
+```
+
+Leaving `coordguard` installed is harmless but pointless: at v2.0.0 it registers
+no enforcement hooks at all, just a one-time notice telling you to do the above.
+Running both a 2.x coordguard *and* coordkit 3.0.0 with guard mode on is the case
+worth actually avoiding — two independent blockers on the same `PreToolUse` event
+keeping two separate fingerprint stores, which mostly buys you confusing double
+denies.
+
 ### Scopes
 
 - **User scope** (default) — installs for your account across every project. Best
@@ -117,27 +229,42 @@ Updates ship by bumping the plugin `version`; users pull them with
 
 ## What gets wired
 
-**coordkit** registers five lifecycle hooks (all invoked via
-`${CLAUDE_PLUGIN_ROOT}` so the install location doesn't matter):
+**coordkit** registers five lifecycle events across seven hook entries. Every one
+of them invokes the *same* dispatcher —
+`${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh` (via `${CLAUDE_PLUGIN_ROOT}` so the
+install location doesn't matter). `coord.sh` sources `bus.sh`, `ledger.sh`, and
+`guard.sh` as **libraries** and runs their phases in-process, so a hook event
+costs one shell rather than one shell per subsystem:
 
-| Event                | Matcher                  | Invocation                                          |
-| -------------------- | ------------------------ | --------------------------------------------------- |
-| `SessionStart`     | —                       | `claude-bus.sh start`, `claude-ledger.sh start` |
-| `UserPromptSubmit` | —                       | `claude-bus.sh task`, `claude-ledger.sh prompt` |
-| `PreToolUse`       | `Write\|Edit`           | `claude-bus.sh check`                             |
-| `PostToolUse`      | `Write\|Edit\|Read\|Bash` | `claude-bus.sh record`                            |
-| `SessionEnd`       | —                       | `claude-bus.sh stop` (end-of-session cleanup)     |
+| Event                | Matcher                            | `coord.sh` subcommand | Phases run, in order                                                     |
+| -------------------- | ---------------------------------- | ----------------------- | ------------------------------------------------------------------------ |
+| `SessionStart`     | —                                 | `session-start`       | bus `start` → ledger `start`                                       |
+| `UserPromptSubmit` | —                                 | `prompt-submit`       | bus `task` → ledger `prompt`                                       |
+| `PreToolUse`       | `Write\|Edit\|NotebookEdit`       | `pretool-write`       | guard `check` (**may `deny` — guard mode only**) → bus `check` (warn) |
+| `PreToolUse`       | `Bash`                           | `pretool-bash`        | guard `snapshot` (fingerprint tracked files)                             |
+| `PostToolUse`      | `Write\|Edit\|NotebookEdit\|Read` | `posttool-write`      | bus `record` → guard `record`                                      |
+| `PostToolUse`      | `Bash`                           | `posttool-bash`       | bus `record` → guard `absorb` (re-stamp self-inflicted changes)     |
+| `SessionEnd`       | —                                 | `session-end`         | bus `stop` → guard `cleanup` (end-of-session cleanup)               |
 
-**coordguard** registers the blocker (and the companion record phase it needs to
-avoid blocking on files this session legitimately read):
+`PostToolUse` is two entries rather than 2.x's single
+`Write|Edit|NotebookEdit|Read|Bash` matcher, because Bash needs guard's `absorb`
+while the other tools need its `record`.
 
-| Event           | Matcher             | Invocation                                                        |
-| --------------- | ------------------- | ----------------------------------------------------------------- |
-| `PreToolUse`  | `Write\|Edit`      | `concurrency-guard.sh check` (can return a `deny`)            |
-| `PreToolUse`  | `Bash`            | `concurrency-guard.sh snapshot` (fingerprint tracked files)     |
-| `PostToolUse` | `Read\|Write\|Edit` | `concurrency-guard.sh record`                                   |
-| `PostToolUse` | `Bash`            | `concurrency-guard.sh absorb` (re-stamp self-inflicted changes) |
-| `SessionEnd`  | —                  | `concurrency-guard.sh cleanup` (end-of-session cleanup)         |
+Guard runs *before* the bus on `pretool-write`, and a deny **short-circuits** —
+`coord.sh` exits without running the bus check at all, since a soft "someone else
+touched this" warning adds nothing to a call that's already been stopped. In warn
+mode guard's check is a no-op and the bus check always runs.
+
+Only guard's `check` consults the enforcement mode. Every other guard phase —
+`snapshot`, `record`, `absorb`, and `cleanup` — runs in **both** modes: they
+only maintain the fingerprint store (and, at session end, remove it), and none of
+them can deny. That's what lets `/guard on` take effect immediately and apply to
+files you already read, rather than starting from an empty store at the moment
+you flip it.
+
+Because the phases share one process, `SessionStart` and `UserPromptSubmit` also
+merge the bus's and the ledger's injected context into a single
+`additionalContext` payload instead of emitting two competing ones.
 
 The `snapshot`/`absorb` pair brackets every Bash call so files modified by this
 session's **own** shell commands (`sed -i`, formatters, `git checkout`) don't
@@ -162,7 +289,8 @@ Both prior caveats were tested on Claude Code **v2.1.193** (empirical dry-run vi
 - **`SessionStart` additionalContext works.** No issue #16538 exists in the
   current changelog; `hookSpecificOutput.additionalContext` from a plugin
   `SessionStart` hook is injected (since v2.1.152+) and even re-runs on resume.
-  `claude-ledger.sh` injects the shared-context digest on `SessionStart` directly.
+  the ledger's `start` phase injects the shared-context digest on `SessionStart`
+  directly.
 
 ## Maintenance — garbage-collecting a bus
 

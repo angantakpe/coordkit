@@ -5,8 +5,42 @@ All notable changes to **coordkit** are documented here. This project follows
 `.claude-plugin/plugin.json` is the canonical tooling-version axis — bump it to
 ship an update to installed users.
 
-coordguard is a separate plugin on its own version axis — its entries live in
-`plugins/coordguard/CHANGELOG.md`.
+coordguard used to be a separate plugin on its own version axis; as of 3.0.0 it
+is merged in here and its package is a deprecated tombstone. Its historical
+entries remain in `plugins/coordguard/CHANGELOG.md`.
+
+## 3.0.0
+
+Merges coordguard into coordkit. One plugin, one hook surface, two enforcement
+levels.
+
+**Nothing changes for existing users unless they opt in.** Out of the box 3.0.0
+behaves exactly like 2.3.0 — warn-only, never denies a tool call.
+
+### Added
+- **Guard mode** — coordguard's hard anti-clobber blocker, now built in. When
+  enabled, a Write/Edit is denied (PreToolUse `deny`) if the target file changed
+  on disk since this session last read it, i.e. a sibling instance edited it.
+  Bash calls stay fingerprint-bracketed, so this session's own shell edits
+  (`sed -i`, formatters, `git checkout`) don't false-positive. Off by default;
+  enable it any of three ways:
+  - `/guard on` (per repo),
+  - `[mode] enforcement = "guard"` in `.claude/coord/coord.toml`,
+  - `COORDKIT_MODE=guard` in the environment.
+
+### Changed
+- **One dispatcher.** The hooks now call a single `scripts/coord.sh`, which
+  fans out to the bus, the ledger, and (in guard mode) the guard. `hooks.json`
+  fires on the union of both plugins' events; the guard phases are gated behind
+  the mode check, so in the default warn-only mode they are no-ops.
+- coordguard's `scripts/concurrency-guard.sh` now lives here as
+  `scripts/guard.sh`.
+
+### Deprecated
+- **The standalone `coordguard` plugin.** It is now a tombstone at 2.0.0 that
+  installs no enforcement hooks and only prints a deprecation notice. Switch to
+  `/guard on` here and uninstall it. Running both is not harmful, but the
+  tombstone does nothing for you.
 
 ## 2.3.0
 

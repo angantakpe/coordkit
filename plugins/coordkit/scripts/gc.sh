@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gc.sh — garbage-collect a repo's .claude-bus/ coordination state.
 #
-# claude-bus.sh already prunes hard-stale agents and their orphaned claims at
+# bus.sh already prunes hard-stale agents and their orphaned claims at
 # SessionStart, and auto-trims activity.log at 600 lines. This is the manual,
 # heavier-handed pass: it also reaps orphaned cursors and drained inbox dirs,
 # trims the log to an arbitrary size, and can remove the bus outright when a
@@ -12,7 +12,7 @@
 # Usage: cobus gc [--apply] [--keep N] [--nuke --yes-i-am-sure] [repo]
 set -uo pipefail
 
-STALE_HARD=21600   # 6h — same threshold claude-bus.sh uses to call an agent dead
+STALE_HARD=21600   # 6h — same threshold bus.sh uses to call an agent dead
 KEEP=350           # activity.log lines retained by a trim
 TRIM_AT=600        # trim only once the log exceeds this (matches the auto-trim)
 
@@ -51,7 +51,7 @@ done
 case "$KEEP" in ''|*[!0-9]*) echo "gc: --keep must be a number" >&2; exit 2 ;; esac
 
 # Root resolution comes from the shared library, so gc collects exactly the bus
-# claude-bus.sh writes.
+# bus.sh writes.
 # shellcheck source=./common.sh
 . "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh"
 

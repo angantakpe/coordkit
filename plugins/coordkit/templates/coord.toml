@@ -41,3 +41,28 @@ proto = "2.0"
 # lock-step with schema/MANIFEST.json's `min_reader` (both "2.0"). A clone older
 # than this should warn rather than silently mis-read newer events.
 min_reader = "2.0"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Everything ABOVE this line is the flat transport pointer, and it must stay
+# above the first [table] header: the transport reader (transports/lib.sh) is a
+# deliberately tiny TOML parser that stops at the first '['. Add new flat keys
+# above, new tables below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ENFORCEMENT — is coordkit allowed to hard-block a tool call in this repo?
+# A DIFFERENT axis from the top-level `mode` transport key above (local/git/
+# relay), which is about where events are shared. The table is named for the
+# axis rather than `[mode]` precisely because that top-level `mode` key already
+# exists — TOML forbids a bare key and a table sharing a name.
+#
+#   "warn"  — the default and coordkit's standing contract: the hooks observe
+#             who else is live and warn softly on a collision, but NEVER deny a
+#             tool call.
+#   "guard" — additionally arm the anti-clobber guard: a Write/Edit to a file
+#             that changed on disk since this session last Read it (or that this
+#             session never Read) is DENIED until it is re-Read and reconciled.
+#
+# Override per-machine with COORDKIT_ENFORCEMENT=guard|warn, or per-user via
+# `enforcement=guard` in $COORDKIT_DATA/config. Toggle with /guard on|off.
+[enforcement]
+mode = "warn"

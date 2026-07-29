@@ -6,14 +6,8 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "start"],
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh", "start"],
-            "timeout": 5
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "session-start"],
+            "timeout": 10
           }
         ]
       }
@@ -24,14 +18,8 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "task"],
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh", "prompt"],
-            "timeout": 5
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "prompt-submit"],
+            "timeout": 10
           }
         ]
       }
@@ -43,7 +31,19 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "check"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "pretool-write"],
+            "timeout": 5,
+            "statusMessage": "Checking for concurrent edits..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "pretool-bash"],
             "timeout": 5
           }
         ]
@@ -51,12 +51,23 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|NotebookEdit|Read|Bash",
+        "matcher": "Write|Edit|NotebookEdit|Read",
         "hooks": [
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "record"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "posttool-write"],
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "posttool-bash"],
             "timeout": 5
           }
         ]
@@ -68,7 +79,7 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/claude-bus.sh", "stop"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "session-end"],
             "timeout": 5
           }
         ]

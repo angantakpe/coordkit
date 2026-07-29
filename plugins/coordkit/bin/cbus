@@ -20,7 +20,7 @@ if command -v readlink >/dev/null 2>&1; then
 fi
 
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}"
-BUS="${ROOT}/scripts/claude-bus.sh"
+BUS="${ROOT}/scripts/bus.sh"
 
 if [ ! -x "$BUS" ]; then
   echo "cbus: bus transport not found or not executable: $BUS" >&2

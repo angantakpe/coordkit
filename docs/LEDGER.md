@@ -1,6 +1,6 @@
 # How the ledger works
 
-`plugins/coordkit/scripts/claude-ledger.sh` is coordkit's shared-context layer.
+`plugins/coordkit/scripts/ledger.sh` is coordkit's shared-context layer.
 It sits **on top of** the bus (`docs/BUS.md`) — it reuses the bus's per-repo
 heartbeats (`.claude-bus/agents/<sid>.json`) to decide whether a session is
 still alive, but it answers a different question. The bus tells you *who else
@@ -74,14 +74,14 @@ liveness is the bus's job, the ledger only asks it the question.
 Reading the *entire* ledger on every turn doesn't scale and would flood every
 prompt with history nobody needs. Instead:
 
-- **`SessionStart`** (`claude-ledger.sh start`): computes the small
+- **`SessionStart`** (`ledger.sh start`): computes the small
   *materialized state* (open/claimed/blocked tasks, the 5 most recent
   decisions, any open questions) — always included, it's cheap — then adds
   events strictly newer than this session's cursor (`cursors/<sid>.json`,
   capped at `PAGE=20` events, each body truncated to `BODYCAP=240` chars). A
   brand-new session starts its cursor one page back (not at zero), so it gets
   recent context instead of either nothing or the entire history.
-- **`UserPromptSubmit`** (`claude-ledger.sh prompt`): injects only the delta
+- **`UserPromptSubmit`** (`ledger.sh prompt`): injects only the delta
   from *other* instances since your last turn, then advances your cursor.
   You never see your own writes echoed back.
 - Cursors for sessions whose bus heartbeat is long gone get pruned
@@ -121,6 +121,19 @@ requested but not enabled. Setting `COORDKIT_MODE`/`COORDKIT_USE_LOGSTORE`
 directly in your own environment is *your* explicit decision and still
 activates immediately — the gate only applies to the toml-derived path.
 
+**Not to be confused with enforcement mode.** Everything above — `COORDKIT_MODE`
+and `coord.toml`'s top-level `mode` — is about the **transport**
+(`local` / `git` / `relay`). Since 3.0.0 coordkit also has an **enforcement**
+mode (`warn` / `guard`) deciding whether the guard denies a clobbering edit.
+That's a separate setting with its own env var (`COORDKIT_ENFORCEMENT`) and its
+own `[enforcement]` table in the same file; see the README's
+[Enforcement modes](../README.md#enforcement-modes). The two share the word
+"mode" and nothing else — neither reads the other's value.
+
+The trust gate is likewise unaffected by guard mode: the guard reads and writes
+only local, per-session fingerprint state and never reads or appends to the
+shared log, so nothing a hostile repo can commit influences whether it denies.
+
 On top of the gate, injected digest content is framed as **untrusted data,
 not instructions** — even in local/direct mode where every writer is a
 same-machine sibling you already trust, so the framing costs nothing and adds
@@ -141,10 +154,10 @@ mode can never resolve to two different `.claude-bus` trees.
 
 | Slash command | What it calls | Does |
 | --- | --- | --- |
-| `/ctx` | `claude-ledger.sh digest`, `board` | Full digest + task board, read-only |
-| `/led <verb> [subject] [text]` | `claude-ledger.sh <verb> ...` | Drives every write verb below |
+| `/ctx` | `ledger.sh digest`, `board` | Full digest + task board, read-only |
+| `/led <verb> [subject] [text]` | `ledger.sh <verb> ...` | Drives every write verb below |
 
-`claude-ledger.sh` phases (also reachable via `cobus <verb>` from a plain
+`ledger.sh` phases (also reachable via `cobus <verb>` from a plain
 shell, since `bin/cobus` forwards anything it doesn't special-case straight to
 the ledger):
 
@@ -178,7 +191,7 @@ ledger's**, with two ways to talk to it:
 - **`/led task` / `claim <subject>` / `next` / `block`** — the full engine,
   for when you want dependencies (`dep:<subject>`) or Claude-instance
   self-organization via `next`'s auto-claim.
-- **`/claim "<desc>"` / `/tasks` / `claude-bus.sh done "<text>"`** — a
+- **`/claim "<desc>"` / `/tasks` / `bus.sh done "<text>"`** — a
   free-text shorthand over the *same* engine. `/claim` publishes a task
   *and* immediately leases it to you in one step (computing the subject via
   the shared `slug()` in `common.sh`, so it's always the identical subject

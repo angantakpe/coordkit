@@ -8,6 +8,29 @@ ship an update to installed users.
 coordguard is versioned independently of coordkit; entries below cover only the
 guard. See `plugins/coordkit/CHANGELOG.md` for the bus and ledger.
 
+## 2.0.0
+
+**Deprecated — this plugin is now a tombstone.** The guard moved into coordkit
+3.0.0, where it ships as an opt-in mode. Install coordkit and run `/guard on`
+to get exactly the blocking behavior coordguard 1.2.0 provided, then uninstall
+coordguard.
+
+Two plugins were maintaining overlapping enforcement over the same
+PreToolUse/PostToolUse surface, with two fingerprint stores and two sets of
+hooks that had to agree about what a sibling's edit looks like. Folding the
+guard into coordkit leaves one code path. See coordkit's 3.0.0 changelog and
+README for the full rationale and the mode-selection details.
+
+### Removed
+- **All enforcement hooks.** The `check` / `snapshot` / `record` / `absorb` /
+  `cleanup` phases and `scripts/concurrency-guard.sh` are gone from this
+  package; the script now lives in coordkit as `scripts/guard.sh`.
+
+### Added
+- A single `SessionStart` hook (`scripts/deprecated-notice.sh`) that prints a
+  one-time notice pointing at `/guard on` in coordkit. That is all this package
+  does.
+
 ## 1.2.0
 
 Closes the guard's documented Bash blind spot.

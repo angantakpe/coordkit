@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "coordkit",
   "displayName": "coordkit",
-  "version": "2.3.0",
-  "description": "Same-machine multi-instance coordination for Claude Code: a per-repo bus + cross-instance ledger that tracks who else is live and which files they touch, and surfaces it. WARN-only by design — these hooks never block a tool call.",
+  "version": "3.0.0",
+  "description": "Same-machine multi-instance coordination for Claude Code: a per-repo bus + cross-instance ledger that tracks who else is live and which files they touch, and surfaces it. NEVER BLOCKS BY DEFAULT — out of the box these hooks only observe and warn. Now also includes the opt-in hard anti-clobber guard (formerly the coordguard plugin): off unless you run /guard on, and only then can a Write/Edit to a file another instance changed be denied.",
   "author": {
     "name": "codehornets",
     "email": "codehornets@gmail.com"

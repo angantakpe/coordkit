@@ -1,11 +1,11 @@
 ---
 description: Show the shared cross-instance context layer — task queue, current decisions, open questions, and recent ledger events
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh digest:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh board:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ledger.sh digest:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ledger.sh board:*)
 ---
 
 Show me the shared-context ledger for this repo (what every live Claude instance knows).
 
-!`${CLAUDE_PLUGIN_ROOT}/scripts/claude-ledger.sh digest`
+!`${CLAUDE_PLUGIN_ROOT}/scripts/ledger.sh digest`
 
 Present the output above. Then in one or two lines:
 - Flag any **open** task whose deps are satisfied that I could pick up (`/led next`).

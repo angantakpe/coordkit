@@ -1,9 +1,15 @@
 # How the bus works
 
-`plugins/coordkit/scripts/claude-bus.sh` is coordkit's awareness layer — the
+`plugins/coordkit/scripts/bus.sh` is coordkit's awareness layer — the
 "who else is here, what are they touching" half of the system. It's simpler
 than the ledger (`docs/LEDGER.md`): no event sourcing, just per-session
 heartbeat files and a soft-lock convention, refreshed on every hook.
+
+The bus is not invoked directly by hooks. Every lifecycle event goes to the
+single dispatcher `plugins/coordkit/scripts/coord.sh`, which sources `bus.sh`,
+`ledger.sh`, and `guard.sh` as libraries and runs their phases in-process — so
+one hook event costs one shell, not one per subsystem. This doc covers only the
+bus's phases; see [§8](#8-the-bus-and-guard-mode) for where guard fits.
 
 ## 1. State layout
 
@@ -40,9 +46,11 @@ chars), and up to 8 recently-touched files. Two thresholds classify an agent:
 ## 3. Collision warnings — age-aware
 
 On `PreToolUse Write|Edit` (`check` phase), if the target file has a recorded
-claim from a **different, still-live** session, you get a soft warning (never
-a block — that's coordguard's job, a separate plugin) plus a debounced
-desktop notification. The warning respects the claim's own age: a claim older
+claim from a **different, still-live** session, you get a soft warning plus a
+debounced desktop notification. The bus itself **never blocks** — a hard deny is
+guard mode's job ([§8](#8-the-bus-and-guard-mode)), and the two are separate
+mechanisms with separate state even though they now ship in one plugin. The
+warning respects the claim's own age: a claim older
 than `STALE_SOFT` no longer triggers the proactive nag, even if the owning
 session's heartbeat is technically still alive — a file touched once near the
 start of a long session shouldn't keep warning every sibling for hours. The
@@ -64,7 +72,7 @@ every live agent regardless of who sent it.
 
 `claim "<desc>"`, `done "<text>"`, and `tasks` used to write/read their own
 `TASKS.md` markdown file. They don't anymore — they're a free-text shorthand
-over `claude-ledger.sh`'s own event-sourced task queue. Full details, and why
+over `ledger.sh`'s own event-sourced task queue. Full details, and why
 this consolidation happened, live in `docs/LEDGER.md` §7
 ("One task queue, two front-ends").
 
@@ -87,12 +95,41 @@ so a solo session sees a clean statusline.
 
 | Slash command | What it calls | Does |
 | --- | --- | --- |
-| `/bus` | `claude-bus.sh dashboard` | One-shot snapshot: live agents, collisions, task board, recent activity |
-| `/claim "<desc>"` | `claude-bus.sh claim` | Publish + immediately lease a ledger task |
-| `/tasks` | `claude-bus.sh tasks` | Print the ledger's projected task board |
-| `/msg <target> "<text>"` | `claude-bus.sh msg` | Deliver a message to another live instance |
+| `/bus` | `bus.sh dashboard` | One-shot snapshot: live agents, collisions, task board, recent activity |
+| `/claim "<desc>"` | `bus.sh claim` | Publish + immediately lease a ledger task |
+| `/tasks` | `bus.sh tasks` | Print the ledger's projected task board |
+| `/msg <target> "<text>"` | `bus.sh msg` | Deliver a message to another live instance |
 
-Run outside a slash command: `cbus` (alias for `claude-bus.sh watch`, a
+Run outside a slash command: `cbus` (alias for `bus.sh watch`, a
 2s-refresh full-screen monitor meant for a spare terminal pane) and `cobus gc`
 (lifecycle cleanup — dead agents/claims/cursors, log rotation; dry-run by
 default, see its own `--help`).
+
+## 8. The bus and guard mode
+
+Through coordkit 2.x, the hard anti-clobber blocker was a **separate plugin**
+(`coordguard`) that you installed alongside coordkit. As of **3.0.0** it ships
+inside coordkit as `plugins/coordkit/scripts/guard.sh`, sourced by the same
+`coord.sh` dispatcher as the bus and the ledger. Full details — the `warn`
+vs `guard` modes, how the mode is resolved from env / `coord.toml` / per-user
+config, `/guard on|off|status`, and the fail-open discipline — live in the
+README's [Enforcement modes](../README.md#enforcement-modes) section.
+
+Same plugin, still two mechanisms. Worth keeping straight:
+
+|                | Bus collision warning              | Guard deny                                       |
+| -------------- | ---------------------------------- | ------------------------------------------------ |
+| Asks           | "is another *live session* holding a claim on this file?" | "did this file change *on disk* since I last read it?" |
+| State          | `claims/<sha>.json` (§1) — shared across sessions | per-session `mtime:size` fingerprints, private to this session |
+| Needs a sibling to be alive | yes — a dead session's claim doesn't warn | no — it catches any external change, including your own `git pull` |
+| Outcome        | warning + notification, edit proceeds | `deny`, and only when mode is `guard`          |
+
+They fire on the same `PreToolUse Write|Edit|NotebookEdit` event, guard first —
+and a guard deny short-circuits, so the bus check is skipped entirely rather than
+appending a warning to an already-stopped call.
+
+Because guard compares the file's own on-disk state rather than asking who
+claimed what, it catches cases the bus can't (a sibling that already exited, a
+rebase, an editor outside Claude) — and conversely the bus warns about a *live*
+sibling working in the same file even when neither of you has written to it yet.
+Neither subsumes the other, which is why both still run.
