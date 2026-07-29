@@ -5,9 +5,24 @@ All notable changes to **coordkit** are documented here. This project follows
 `.claude-plugin/plugin.json` is the canonical tooling-version axis — bump it to
 ship an update to installed users.
 
-coordguard used to be a separate plugin on its own version axis; as of 3.0.0 it
-is merged in here and its package is a deprecated tombstone. Its historical
-entries remain in `plugins/coordguard/CHANGELOG.md`.
+coordguard used to be a separate plugin on its own version axis; as of 3.0.0 its
+enforcement logic is merged in here. It shipped one further release, 2.0.0, as
+a deprecation tombstone (no enforcement, just a notice pointing at `/guard
+on`), then the package was removed from this marketplace entirely — see below.
+Its historical entries are no longer on disk but remain in git history
+(`git log -- plugins/coordguard/`).
+
+## Unreleased
+
+### Removed
+- **The `coordguard` plugin, entirely.** The 2.0.0 tombstone described under
+  3.0.0 below has been deleted from the marketplace and the repo — it's no
+  longer listed in `.claude-plugin/marketplace.json` and `plugins/coordguard/`
+  is gone. If you still have coordguard installed from before, the marketplace
+  no longer serves it, so `/plugin update` won't touch it; run
+  `/plugin uninstall coordguard@coordkit` to remove it manually. Nothing
+  changes for coordkit itself — this is a marketplace-listing cleanup, not a
+  coordkit behavior change.
 
 ## 3.0.0
 
@@ -25,8 +40,9 @@ behaves exactly like 2.3.0 — warn-only, never denies a tool call.
   (`sed -i`, formatters, `git checkout`) don't false-positive. Off by default;
   enable it any of three ways:
   - `/guard on` (per repo),
-  - `[mode] enforcement = "guard"` in `.claude/coord/coord.toml`,
-  - `COORDKIT_MODE=guard` in the environment.
+  - `[enforcement] mode = "guard"` in `.claude/coord/coord.toml`,
+  - `COORDKIT_ENFORCEMENT=guard` in the environment (a distinct variable from
+    the pre-existing `COORDKIT_MODE`, which selects transport, not enforcement).
 
 ### Changed
 - **One dispatcher.** The hooks now call a single `scripts/coord.sh`, which

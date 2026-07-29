@@ -24,14 +24,15 @@ It ships **two plugins**:
 | **coordkit** | 3.0.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard. Tracks who else is live in a repo and which files they touch and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other — and, where you ask for it, *denies* an edit that would clobber theirs. |
 | **skillkit** | 1.0.2   | **Suggest-only — never blocks**                            | Skill auto-activation. On every prompt it matches layered`skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
 
-> **`coordguard` is no longer a functional plugin.** Through 2.x, the hard
-> anti-clobber blocker shipped as a separate `coordguard` package you installed
-> alongside coordkit. As of coordkit **3.0.0** that blocker lives inside
-> coordkit as opt-in [guard mode](#enforcement-modes). The `coordguard`
-> package still exists at **v2.0.0**, but purely as a deprecation tombstone: it
-> registers no enforcement hooks, only a one-time `SessionStart` notice pointing
-> at `/guard on`. Uninstall it once you've migrated — see
-> [Install](#install).
+> **`coordguard` has been removed.** Through 2.x, the hard anti-clobber
+> blocker shipped as a separate `coordguard` package you installed alongside
+> coordkit. As of coordkit **3.0.0** that blocker lives inside coordkit as
+> opt-in [guard mode](#enforcement-modes). `coordguard` shipped one further
+> release as a deprecation tombstone (v2.0.0, no enforcement — just a notice),
+> and has since been deleted from this marketplace and repo entirely. If you
+> still have it installed from before, `/plugin update` won't fix it (the
+> marketplace no longer serves it) — run `/plugin uninstall coordguard@coordkit`
+> manually. See [Install](#install).
 
 ## Documentation
 
@@ -208,12 +209,15 @@ guard mode on in the repos that relied on it:
 /guard on          # run inside each repo that wants the hard guard
 ```
 
-Leaving `coordguard` installed is harmless but pointless: at v2.0.0 it registers
-no enforcement hooks at all, just a one-time notice telling you to do the above.
-Running both a 2.x coordguard *and* coordkit 3.0.0 with guard mode on is the case
-worth actually avoiding — two independent blockers on the same `PreToolUse` event
-keeping two separate fingerprint stores, which mostly buys you confusing double
-denies.
+`coordguard` is no longer listed in this marketplace at all — it briefly shipped
+one further release as a deprecation tombstone (v2.0.0, no enforcement hooks,
+just a one-time notice) before being deleted entirely. `/plugin marketplace
+update` won't remove a pre-existing install for you (the catalog simply no
+longer offers updates for it); the uninstall above is the only way to clear it.
+Running a stale 2.x coordguard *and* coordkit 3.0.0 with guard mode on is the
+case worth actually avoiding — two independent blockers on the same
+`PreToolUse` event keeping two separate fingerprint stores, which mostly buys
+you confusing double denies.
 
 ### Scopes
 

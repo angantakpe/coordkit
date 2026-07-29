@@ -5,7 +5,7 @@
     "name": "codehornets",
     "email": "codehornets@gmail.com"
   },
-  "description": "Claude Code orchestration: a shared bus + ledger that warns about concurrent edits, with an opt-in hard anti-clobber guard built in (coordkit), and skill auto-activation with agents and dev-docs (skillkit). coordguard is a deprecated tombstone — its guard now ships inside coordkit.",
+  "description": "Claude Code orchestration: a shared bus + ledger that warns about concurrent edits, with an opt-in hard anti-clobber guard built in (coordkit), and skill auto-activation with agents and dev-docs (skillkit). coordguard was merged into coordkit at 3.0.0 and is no longer part of this marketplace — see coordkit's guard mode (/guard on).",
   "plugins": [
     {
       "name": "skillkit",
@@ -46,26 +46,6 @@
         "hooks"
       ],
       "category": "workflow"
-    },
-    {
-      "name": "coordguard",
-      "source": "./plugins/coordguard",
-      "description": "DEPRECATED — as of coordkit 3.0.0 this plugin's anti-clobber guard was merged into coordkit as an opt-in guard mode. Installing this version gets you no enforcement: it only prints a one-time deprecation notice pointing at /guard on in coordkit. Nothing to install here for functionality — uninstall it once you've switched.",
-      "version": "2.0.0",
-      "author": {
-        "name": "codehornets",
-        "email": "codehornets@gmail.com"
-      },
-      "keywords": [
-        "deprecated",
-        "coordination",
-        "concurrency",
-        "guard",
-        "anti-clobber",
-        "hooks",
-        "safety"
-      ],
-      "category": "safety"
     }
   ]
 }

@@ -69,7 +69,9 @@ cp ${CLAUDE_PLUGIN_ROOT}/templates/skill-rules.example.json ~/.claude/skills/ski
 
 ## Relationship to the other plugins
 
-coordkit answers "who else is working here"; coordguard stops cross-instance
-clobbers; **skillkit answers "which of my installed skills should fire for
-this prompt."** All three follow the marketplace's layering contract: only
-coordguard may block, everything else observes and surfaces.
+coordkit answers "who else is working here" and, in opt-in guard mode, stops
+cross-instance clobbers; **skillkit answers "which of my installed skills
+should fire for this prompt."** Both follow the marketplace's layering
+contract: skillkit only observes and surfaces, never blocks; coordkit's guard
+mode is the one thing in this marketplace that can deny a tool call, and only
+when a repo has explicitly opted in.
