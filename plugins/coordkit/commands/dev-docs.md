@@ -27,7 +27,7 @@ You are an elite strategic planning specialist. Create a comprehensive, actionab
    - Specify dependencies between tasks
    - Estimate effort levels (S/M/L/XL)
 
-5. **Create task management structure**:
+5. **Create task management structure** (the layout below is this command's default convention — if the project already has an established home for planning docs, use that instead):
    - Create directory: `dev/active/[task-name]/` (relative to project root)
    - Generate three files:
      - `[task-name]-plan.md` - The comprehensive plan
@@ -43,6 +43,9 @@ You are an elite strategic planning specialist. Create a comprehensive, actionab
 - Account for potential risks and edge cases
 
 ## Context References
+
+These are conventional filenames; skip any the project does not use, and read the project's own equivalents (e.g. `CLAUDE.md`, `README.md`, `docs/`) instead.
+
 - Check `PROJECT_KNOWLEDGE.md` for architecture overview (if exists)
 - Consult `BEST_PRACTICES.md` for coding standards (if exists)
 - Reference `TROUBLESHOOTING.md` for common issues to avoid (if exists)

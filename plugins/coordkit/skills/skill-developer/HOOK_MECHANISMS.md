@@ -1,63 +1,81 @@
 # Hook Mechanisms - Deep Dive
 
-Technical deep dive into how the UserPromptSubmit and PreToolUse hooks work.
+Technical deep dive into how coordkit's skill-activation hook works.
 
 ## Table of Contents
 
 - [UserPromptSubmit Hook Flow](#userpromptsubmit-hook-flow)
-- [PreToolUse Hook Flow](#pretooluse-hook-flow)
-- [Exit Code Behavior (CRITICAL)](#exit-code-behavior-critical)
-- [Session State Management](#session-state-management)
+- [Rule Layering and Merge Order](#rule-layering-and-merge-order)
+- [Matching Semantics](#matching-semantics)
+- [Exit Code and Stream Behavior](#exit-code-and-stream-behavior)
 - [Performance Considerations](#performance-considerations)
+- [What This Hook Does Not Do](#what-this-hook-does-not-do)
 
 ---
 
 ## UserPromptSubmit Hook Flow
+
+Skill activation is a single stateless bash script,
+`plugins/coordkit/scripts/skill-activation.sh`, registered under
+`UserPromptSubmit` in `plugins/coordkit/hooks/hooks.json`.
 
 ### Execution Sequence
 
 ```
 User submits prompt
     ↓
-.claude/settings.json registers hook
+hooks.json registers the hook (UserPromptSubmit)
     ↓
-skill-activation-prompt.sh executes
+bash skill-activation.sh executes
     ↓
-npx tsx skill-activation-prompt.ts
+jq present?  no → exit 0, silently
+    ↓ yes
+Read stdin (JSON), extract .prompt
     ↓
-Hook reads stdin (JSON with prompt)
+Prompt empty, or starts with "/"?  → exit 0, no output
     ↓
-Loads skill-rules.json
+Lowercase the prompt
     ↓
-Matches keywords + intent patterns
+Load global ~/.claude/skills/skill-rules.json (if present)
+Load project $CLAUDE_PROJECT_DIR/.claude/skills/skill-rules.json (if present)
     ↓
-Groups matches by priority (critical → high → medium → low)
+Neither present? → exit 0
     ↓
-Outputs formatted message to stdout
+Merge the two "skills" objects (project wins on name collision)
     ↓
-stdout becomes context for Claude (injected before prompt)
+Select entries whose keywords or intentPatterns match the prompt
+    ↓
+Group matches by priority (critical → high → medium → low)
+    ↓
+Print the formatted block to stdout
+    ↓
+stdout is injected as context for the turn
     ↓
 Claude sees: [skill suggestion] + user's prompt
 ```
 
 ### Key Points
 
-- **Exit code**: Always 0 (allow)
-- **stdout**: → Claude's context (injected as system message)
-- **Timing**: Runs BEFORE Claude processes prompt
-- **Behavior**: Non-blocking, advisory only
-- **Purpose**: Make Claude aware of relevant skills
+- **Exit code**: always `0`. The hook cannot block a prompt.
+- **stdout**: injected as context for the turn, as plain text — the script does
+  **not** wrap its output in a JSON `hookSpecificOutput` object.
+- **Timing**: runs before Claude processes the prompt.
+- **Behaviour**: non-blocking, advisory only (coordkit's WARN-only philosophy).
+- **State**: none. Every prompt is evaluated independently.
 
 ### Input Format
+
+The hook reads one JSON object on stdin. Only `.prompt` is used; the rest is
+ignored.
 
 ```json
 {
   "session_id": "abc-123",
   "transcript_path": "/path/to/transcript.json",
-  "cwd": "/root/git/your-project",
+  "cwd": "/path/to/your/repo",
   "permission_mode": "normal",
   "hook_event_name": "UserPromptSubmit",
-  "prompt": "how does the layout system work?"
+  "prompt": "how do I add a new skill?"
 }
 ```
 
@@ -65,238 +83,103 @@ Claude sees: [skill suggestion] + user's prompt
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 SKILL ACTIVATION CHECK
+🎯 SKILL ACTIVATION CHECK (skillkit)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📚 RECOMMENDED SKILLS:
-  → project-catalog-developer
+  → coordkit:skill-developer
 
-ACTION: Use Skill tool BEFORE responding
+ACTION: Invoke the matching Skill tool BEFORE responding
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-Claude sees this output as additional context before processing the user's prompt.
+Only the priority buckets that actually have matches are printed. When nothing
+matches, the script prints nothing at all.
 
 ---
 
-## PreToolUse Hook Flow
+## Rule Layering and Merge Order
 
-### Execution Sequence
+Two files are read, in this order:
 
-```
-Claude calls Edit/Write tool
-    ↓
-.claude/settings.json registers hook (matcher: Edit|Write)
-    ↓
-skill-verification-guard.sh executes
-    ↓
-npx tsx skill-verification-guard.ts
-    ↓
-Hook reads stdin (JSON with tool_name, tool_input)
-    ↓
-Loads skill-rules.json
-    ↓
-Checks file path patterns (glob matching)
-    ↓
-Reads file for content patterns (if file exists)
-    ↓
-Checks session state (was skill already used?)
-    ↓
-Checks skip conditions (file markers, env vars)
-    ↓
-IF MATCHED AND NOT SKIPPED:
-  Update session state (mark skill as enforced)
-  Output block message to stderr
-  Exit with code 2 (BLOCK)
-ELSE:
-  Exit with code 0 (ALLOW)
-    ↓
-IF BLOCKED:
-  stderr → Claude sees message
-  Edit/Write tool does NOT execute
-  Claude must use skill and retry
-IF ALLOWED:
-  Tool executes normally
-```
+1. `~/.claude/skills/skill-rules.json` (global)
+2. `$CLAUDE_PROJECT_DIR/.claude/skills/skill-rules.json` (project) — falls back
+   to `$PWD` when `CLAUDE_PROJECT_DIR` is unset
 
-### Key Points
+The project file is skipped if it resolves to the same path as the global one.
+The `skills` objects from each file are merged with the later file winning, so a
+project entry **replaces** the global entry of the same skill name outright — it
+is not a deep merge, so a project entry must restate every field it needs.
 
-- **Exit code 2**: BLOCK (stderr → Claude)
-- **Exit code 0**: ALLOW
-- **Timing**: Runs BEFORE tool execution
-- **Session tracking**: Prevents repeated blocks in same session
-- **Fail open**: On errors, allows operation (don't break workflow)
-- **Purpose**: Enforce critical guardrails
-
-### Input Format
-
-```json
-{
-  "session_id": "abc-123",
-  "transcript_path": "/path/to/transcript.json",
-  "cwd": "/root/git/your-project",
-  "permission_mode": "normal",
-  "hook_event_name": "PreToolUse",
-  "tool_name": "Edit",
-  "tool_input": {
-    "file_path": "/root/git/your-project/form/src/services/user.ts",
-    "old_string": "...",
-    "new_string": "..."
-  }
-}
-```
-
-### Output Format (to stderr when blocked)
-
-```
-⚠️ BLOCKED - Database Operation Detected
-
-📋 REQUIRED ACTION:
-1. Use Skill tool: 'database-verification'
-2. Verify ALL table and column names against schema
-3. Check database structure with DESCRIBE commands
-4. Then retry this edit
-
-Reason: Prevent column name errors in Prisma queries
-File: form/src/services/user.ts
-
-💡 TIP: Add '// @skip-validation' comment to skip future checks
-```
-
-Claude receives this message and understands it needs to use the skill before retrying the edit.
+Both files use the identical schema; see
+[SKILL_RULES_REFERENCE.md](SKILL_RULES_REFERENCE.md).
 
 ---
 
-## Exit Code Behavior (CRITICAL)
+## Matching Semantics
 
-### Exit Code Reference Table
+A skill matches if **either** condition holds:
 
-| Exit Code | stdout | stderr | Tool Execution | Claude Sees |
-|-----------|--------|--------|----------------|-------------|
-| 0 (UserPromptSubmit) | → Context | → User only | N/A | stdout content |
-| 0 (PreToolUse) | → User only | → User only | **Proceeds** | Nothing |
-| 2 (PreToolUse) | → User only | → **CLAUDE** | **BLOCKED** | stderr content |
-| Other | → User only | → User only | Blocked | Nothing |
+- **`promptTriggers.keywords`** — any keyword is a *substring* of the prompt.
+  Both sides are lowercased, so matching is case-insensitive. There is no word
+  boundary: the keyword `"ci"` matches the word "specific".
+- **`promptTriggers.intentPatterns`** — any pattern matches the prompt as a
+  case-insensitive regex (`jq`'s `test($re; "i")`, i.e. Oniguruma syntax). An
+  invalid regex is caught and treated as "no match" rather than erroring out.
 
-### Why Exit Code 2 Matters
-
-This is THE critical mechanism for enforcement:
-
-1. **Only way** to send message to Claude from PreToolUse
-2. stderr content is "fed back to Claude automatically"
-3. Claude sees the block message and understands what to do
-4. Tool execution is prevented
-5. Critical for enforcement of guardrails
-
-### Example Conversation Flow
-
-```
-User: "Add a new user service with Prisma"
-
-Claude: "I'll create the user service..."
-    [Attempts to Edit form/src/services/user.ts]
-
-PreToolUse Hook: [Exit code 2]
-    stderr: "⚠️ BLOCKED - Use database-verification"
-
-Claude sees error, responds:
-    "I need to verify the database schema first."
-    [Uses Skill tool: database-verification]
-    [Verifies column names]
-    [Retries Edit - now allowed (session tracking)]
-```
+Missing `keywords` or `intentPatterns` are treated as empty lists. An entry with
+neither can never match.
 
 ---
 
-## Session State Management
+## Exit Code and Stream Behavior
 
-### Purpose
+| Situation                  | Exit code | stdout                 | Effect on the turn        |
+| -------------------------- | --------- | ---------------------- | ------------------------- |
+| Match found                | 0         | reminder block         | Injected as context       |
+| No match                   | 0         | (empty)                | Nothing injected          |
+| No rules files             | 0         | (empty)                | Nothing injected          |
+| `jq` missing               | 0         | (empty)                | Nothing injected          |
+| Prompt is a slash command  | 0         | (empty)                | Nothing injected          |
 
-Prevent repeated nagging in the same session - once Claude uses a skill, don't block again.
-
-### State File Location
-
-`.claude/hooks/state/skills-used-{session_id}.json`
-
-### State File Structure
-
-```json
-{
-  "skills_used": [
-    "database-verification",
-    "error-tracking"
-  ],
-  "files_verified": []
-}
-```
-
-### How It Works
-
-1. **First edit** of file with Prisma:
-   - Hook blocks with exit code 2
-   - Updates session state: adds "database-verification" to skills_used
-   - Claude sees message, uses skill
-
-2. **Second edit** (same session):
-   - Hook checks session state
-   - Finds "database-verification" in skills_used
-   - Exits with code 0 (allow)
-   - No message to Claude
-
-3. **Different session**:
-   - New session ID = new state file
-   - Hook blocks again
-
-### Limitation
-
-The hook cannot detect when the skill is *actually* invoked - it just blocks once per session per skill. This means:
-
-- If Claude doesn't use the skill but makes a different edit, it won't block again
-- Trust that Claude follows the instruction
-- Future enhancement: detect actual Skill tool usage
+There is no non-zero path. The script uses `set -uo pipefail` (deliberately not
+`-e`) and suppresses `jq` stderr, so a malformed rules file degrades to silence
+rather than to a broken turn. That is convenient in production and inconvenient
+while debugging — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for how to
+surface the error.
 
 ---
 
 ## Performance Considerations
 
-### Target Metrics
+**Target**: < 100ms. The hook is registered with a 5-second timeout in
+`hooks.json`.
 
-- **UserPromptSubmit**: < 100ms
-- **PreToolUse**: < 200ms
+The cost is one `jq` process plus reading both rules files, on every prompt.
+Practical guidance:
 
-### Performance Bottlenecks
+- Keep `skill-rules.json` small — it is re-read and re-parsed each prompt.
+- Prefer keywords over regex where either would do; substring matching is
+  cheaper than compiling a pattern.
+- Keep `intentPatterns` simple. Avoid nested quantifiers, which can backtrack
+  badly on long prompts.
+- There is no caching layer, so the number of entries is the main lever.
 
-1. **Loading skill-rules.json** (every execution)
-   - Future: Cache in memory
-   - Future: Watch for changes, reload only when needed
+---
 
-2. **Reading file content** (PreToolUse)
-   - Only when contentPatterns configured
-   - Only if file exists
-   - Can be slow for large files
+## What This Hook Does Not Do
 
-3. **Glob matching** (PreToolUse)
-   - Regex compilation for each pattern
-   - Future: Compile once, cache
+Skill activation in coordkit is deliberately narrow. It does **not**:
 
-4. **Regex matching** (Both hooks)
-   - Intent patterns (UserPromptSubmit)
-   - Content patterns (PreToolUse)
-   - Future: Lazy compile, cache compiled regexes
+- Block, deny, or modify any tool call
+- Inspect file paths or file contents
+- Run on `PreToolUse`, `PostToolUse`, or `Stop`
+- Track session state, or remember what it suggested last turn
+- Detect whether Claude actually invoked the suggested skill
 
-### Optimization Strategies
-
-**Reduce patterns:**
-- Use more specific patterns (fewer to check)
-- Combine similar patterns where possible
-
-**File path patterns:**
-- More specific = fewer files to check
-- Example: `form/src/services/**` better than `form/**`
-
-**Content patterns:**
-- Only add when truly necessary
-- Simpler regex = faster matching
+coordkit *does* register `SessionStart`, `PreToolUse`, `PostToolUse` and
+`SessionEnd` hooks in the same `hooks.json`, but those run `coord.sh` for the
+coordination bus and anti-clobber guard. They are unrelated to skill activation.
 
 ---
 

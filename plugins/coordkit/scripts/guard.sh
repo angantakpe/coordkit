@@ -83,7 +83,10 @@ _guard_tree_name() {
   if [ -n "${CLAUDE_GUARD_TREE:-}" ]; then printf '%s' "$CLAUDE_GUARD_TREE"; return 0; fi
   if [ -n "${CODEX_GUARD_TREE:-}" ]; then printf '%s' "$CODEX_GUARD_TREE"; return 0; fi
   if [ -n "${GEMINI_GUARD_TREE:-}" ]; then printf '%s' "$GEMINI_GUARD_TREE"; return 0; fi
-  printf 'claude-concurrency'
+  # Renaming this default only orphans an upgrading session's old state dir
+  # (per-session, cache-resident, re-adopted on the next Read) — nothing durable
+  # is keyed on the literal name.
+  printf 'coordkit-guard'
 }
 
 _guard_base() {

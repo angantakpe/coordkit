@@ -18,7 +18,10 @@
 #   log/<actor>/<epoch>-NNNN.ndjson   actor-partitioned local segments (gitignored)
 #   .sync/                            private sync worktree on the log branch (gitignored)
 #   .gitattributes                    `*.ndjson merge=union` (committed backstop)
-#   .coord.lock                       lock file lib holds for appends
+#   .coord.lock                       lock file lib holds for appends — and that
+#                                     __git_sync_copy holds around each copy pass
+#   .coord.lock.sync                  `flock -n` guard making overlapping sync ticks
+#                                     no-ops (a DIFFERENT lock from .coord.lock)
 #
 # readall = union of every local segment under <coord>/log, deduped (eid) + ordered
 # (clock). Remote peers' segments are copied DOWN into <coord>/log by __git_sync, so
@@ -120,12 +123,43 @@ __git_sync_remote() {
   printf '%s' "${r:-origin}"
 }
 
+# Drop an unparseable TRAILING line from a just-copied segment (defense in depth).
+#
+# With the append lock held (see __git_sync_copy) a torn line should be impossible,
+# but a segment written by an OLDER coordkit, or by a process killed mid-write before
+# this lock existed, can still end in a fragment. Committing that fragment would push
+# it to the shared log branch, where it is permanently un-parseable for every clone.
+# So: if the last line does not parse as JSON, drop it from THIS pass. The writer's
+# complete line is still in the source segment and gets picked up on the next sync
+# (the size comparison re-triggers, since the trimmed destination stays smaller).
+# Only the LAST line is examined — an interior line is followed by a complete append
+# and is therefore whole by construction.
+__git_sync_trim_partial() {
+  local f="$1" last trimmed
+  [ -s "$f" ] || return 0
+  last="$(tail -n1 "$f" 2>/dev/null)"
+  [ -n "$last" ] || return 0
+  printf '%s' "$last" | jq -e . >/dev/null 2>&1 && return 0
+  printf 'coordkit[git]: dropping unparseable trailing line from %s for this sync pass\n' "$f" >&2
+  trimmed="$f.trim"
+  if sed '$d' "$f" > "$trimmed" 2>/dev/null; then
+    mv -f "$trimmed" "$f" 2>/dev/null || rm -f "$trimmed" 2>/dev/null || true
+  else
+    rm -f "$trimmed" 2>/dev/null || true
+  fi
+  return 0
+}
+
+# The actual copy loop. NEVER call this directly — go through __git_sync_copy, which
+# holds the append lock around it.
+#
 # Copy per-actor segments from <src> to <dst>, one file at a time, ONLY when the
 # destination is missing or the source is strictly larger (segments are single-writer
 # append-only, so "larger" == "has strictly more appended data"). Each file is written
-# to a temp sibling and atomically renamed so a concurrent reader never sees a partial
-# copy, and a locally-owned segment is never shrunk. Never deletes anything.
-__git_sync_copy() {
+# to a temp sibling, trimmed of any unparseable trailing line, and atomically renamed
+# so a concurrent reader never sees a partial copy, and a locally-owned segment is
+# never shrunk. Never deletes anything.
+__git_sync_copy_unlocked() {
   local src="$1" dst="$2" f rel out ssz dsz tmp
   [ -d "$src" ] || return 0
   find "$src" -type f -name '*.ndjson' 2>/dev/null | while IFS= read -r f; do
@@ -139,12 +173,51 @@ __git_sync_copy() {
     mkdir -p "$(dirname "$out")" 2>/dev/null || continue
     tmp="$out.tmp.$$"
     if cp -f "$f" "$tmp" 2>/dev/null; then
+      __git_sync_trim_partial "$tmp"
       mv -f "$tmp" "$out" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     else
       rm -f "$tmp" 2>/dev/null || true
     fi
   done
   return 0
+}
+
+# Copy segments under the SAME lock appends take (<coord>/.coord.lock, the file
+# __git_lockfile names and __logstore_locked_append flocks).
+#
+# WHY: `printf '%s\n' "$line" >> "$seg"` is NOT atomic once the line outgrows the
+# stdio buffer — it becomes several write(2) calls. Reading such a segment with a
+# plain `cp` while a writer is mid-line yields a TORN line. In the local→sync
+# direction that fragment would be committed and pushed to the shared coordkit/log
+# branch, corrupting the log for every clone that ever pulls it (a truncated line
+# fails `fromjson` and is preserved forever as an opaque "raw:" event by
+# __dedup_by_eid). In the sync→local direction the atomic `mv` could equally well
+# clobber an append that landed after the source snapshot was taken.
+#
+# Two DISTINCT locks are still in play and that is deliberate:
+#   .coord.lock.sync — held for the WHOLE __git_sync run, `flock -n`, so overlapping
+#                      timer ticks become no-ops rather than racing each other.
+#   .coord.lock      — held ONLY for the duration of one copy pass, so appends stall
+#                      for a file-copy rather than for a network fetch/rebase/push.
+# The nesting order is always sync-lock → append-lock and nothing anywhere takes them
+# the other way round, so the pair cannot deadlock.
+__git_sync_copy() {
+  local src="$1" dst="$2" lock rc
+  [ -d "$src" ] || return 0
+  lock="$(__git_lockfile)"
+  mkdir -p "$(dirname "$lock")" 2>/dev/null || true
+  if command -v flock >/dev/null 2>&1; then
+    # -w 5 mirrors __logstore_locked_append: a wedged holder degrades this pass to a
+    # skip (retried on the next tick) instead of hanging the sync forever.
+    ( flock -w 5 9 || exit 1; __git_sync_copy_unlocked "$src" "$dst" ) 9>"$lock"
+  else
+    # No flock(1) (e.g. stock macOS) → same bounded mkdir mutex lib.sh falls back to,
+    # on the same lock path, so writer and syncer still serialise against each other.
+    __logstore_mkdir_lock "${lock}.d" || return 1
+    __git_sync_copy_unlocked "$src" "$dst"; rc=$?
+    rmdir "${lock}.d" 2>/dev/null || true
+    return "$rc"
+  fi
 }
 
 # Ensure the private sync worktree exists at <sync> on branch <branch>, tracking the
@@ -239,8 +312,14 @@ __git_sync() {
     [ -f "$sync/.gitattributes" ] || printf '*.ndjson merge=union\n' > "$sync/.gitattributes" 2>/dev/null || true
     [ -f "$sync/.gitignore" ]     || printf '*.tmp.*\n'            > "$sync/.gitignore"     2>/dev/null || true
 
-    # 1) copy grown local segments up into the private worktree.
-    __git_sync_copy "$coord/log" "$sync/log"
+    # 1) copy grown local segments up into the private worktree (under the APPEND
+    #    lock — see __git_sync_copy — so a writer mid-line can't be committed torn).
+    #    If the append lock can't be taken, commit nothing this pass and retry on the
+    #    next tick rather than publishing a possibly-torn snapshot.
+    __git_sync_copy "$coord/log" "$sync/log" || {
+      printf 'coordkit[git]: could not take the append lock; skipping this sync tick\n' >&2
+      exit 1
+    }
 
     # 2) commit on the private branch — the worktree has its OWN index, so this never
     #    stages anything in the user's index or on the user's branch.
@@ -264,7 +343,12 @@ __git_sync() {
       exit 1
     fi
 
-    # 5) copy peers' segments back down so local readall reflects the whole union.
-    __git_sync_copy "$sync/log" "$coord/log"
+    # 5) copy peers' segments back down so local readall reflects the whole union
+    #    (also under the append lock, so the atomic rename can't land on top of a
+    #    concurrent local append).
+    __git_sync_copy "$sync/log" "$coord/log" || {
+      printf 'coordkit[git]: peers copied down partially; retrying on next tick\n' >&2
+      exit 1
+    }
   ) 9>"$lock"
 }

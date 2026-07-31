@@ -1,456 +1,257 @@
 # Troubleshooting - Skill Activation Issues
 
-Complete debugging guide for skill activation problems.
+Debugging guide for coordkit's skill activation
+(`plugins/coordkit/scripts/skill-activation.sh`).
 
 ## Table of Contents
 
+- [First: The Silence Problem](#first-the-silence-problem)
 - [Skill Not Triggering](#skill-not-triggering)
-  - [UserPromptSubmit Not Suggesting](#userpromptsubmit-not-suggesting)
-  - [PreToolUse Not Blocking](#pretooluse-not-blocking)
 - [False Positives](#false-positives)
 - [Hook Not Executing](#hook-not-executing)
 - [Performance Issues](#performance-issues)
 
 ---
 
-## Skill Not Triggering
+## First: The Silence Problem
 
-### UserPromptSubmit Not Suggesting
+Almost every failure mode here looks identical from the outside: **nothing
+happens**. The hook always exits `0`, suppresses `jq`'s stderr, and prints
+nothing when it has nothing to say. A missing rules file, a JSON syntax error, a
+missing `jq`, and a simply-non-matching prompt are indistinguishable in normal
+use.
 
-**Symptoms:** Ask a question, but no skill suggestion appears in output.
-
-**Common Causes:**
-
-####  1. Keywords Don't Match
-
-**Check:**
-- Look at `promptTriggers.keywords` in skill-rules.json
-- Are the keywords actually in your prompt?
-- Remember: case-insensitive substring matching
-
-**Example:**
-```json
-"keywords": ["layout", "grid"]
-```
-- "how does the layout work?" → ✅ Matches "layout"
-- "how does the grid system work?" → ✅ Matches "grid"
-- "how do layouts work?" → ✅ Matches "layout"
-- "how does it work?" → ❌ No match
-
-**Fix:** Add more keyword variations to skill-rules.json
-
-#### 2. Intent Patterns Too Specific
-
-**Check:**
-- Look at `promptTriggers.intentPatterns`
-- Test regex at https://regex101.com/
-- May need broader patterns
-
-**Example:**
-```json
-"intentPatterns": [
-  "(create|add).*?(database.*?table)"  // Too specific
-]
-```
-- "create a database table" → ✅ Matches
-- "add new table" → ❌ Doesn't match (missing "database")
-
-**Fix:** Broaden the pattern:
-```json
-"intentPatterns": [
-  "(create|add).*?(table|database)"  // Better
-]
-```
-
-#### 3. Typo in Skill Name
-
-**Check:**
-- Skill name in SKILL.md frontmatter
-- Skill name in skill-rules.json
-- Must match exactly
-
-**Example:**
-```yaml
-# SKILL.md
-name: project-catalog-developer
-```
-```json
-// skill-rules.json
-"project-catalogue-developer": {  // ❌ Typo: catalogue vs catalog
-  ...
-}
-```
-
-**Fix:** Make names match exactly
-
-#### 4. JSON Syntax Error
-
-**Check:**
-```bash
-cat .claude/skills/skill-rules.json | jq .
-```
-
-If invalid JSON, jq will show the error.
-
-**Common errors:**
-- Trailing commas
-- Missing quotes
-- Single quotes instead of double
-- Unescaped characters in strings
-
-**Fix:** Correct JSON syntax, validate with jq
-
-#### Debug Command
-
-Test the hook manually:
+So start every investigation by running the hook by hand, where you *can* see
+the error:
 
 ```bash
-echo '{"session_id":"debug","prompt":"your test prompt here"}' | \
-  npx tsx .claude/hooks/skill-activation-prompt.ts
+echo '{"prompt":"your test prompt here"}' \
+  | bash plugins/coordkit/scripts/skill-activation.sh
 ```
 
-Expected: Your skill should appear in the output.
+And validate the rules files directly, which is where the error will actually
+be reported:
+
+```bash
+jq . ~/.claude/skills/skill-rules.json
+jq . "$CLAUDE_PROJECT_DIR/.claude/skills/skill-rules.json"
+```
 
 ---
 
-### PreToolUse Not Blocking
+## Skill Not Triggering
 
-**Symptoms:** Edit a file that should trigger a guardrail, but no block occurs.
+**Symptoms:** you ask a question, but no skill suggestion appears.
 
-**Common Causes:**
+### 1. Keywords Don't Match
 
-#### 1. File Path Doesn't Match Patterns
+**Check:** `promptTriggers.keywords` in `skill-rules.json`. Matching is
+case-insensitive substring — no word boundaries, no stemming.
 
-**Check:**
-- File path being edited
-- `fileTriggers.pathPatterns` in skill-rules.json
-- Glob pattern syntax
-
-**Example:**
 ```json
-"pathPatterns": [
-  "frontend/src/**/*.tsx"
-]
+"keywords": ["skill rules", "activation"]
 ```
-- Editing: `frontend/src/components/Dashboard.tsx` → ✅ Matches
-- Editing: `frontend/tests/Dashboard.test.tsx` → ✅ Matches (add exclusion!)
-- Editing: `backend/src/app.ts` → ❌ Doesn't match
+- "how do the **skill rules** work?" → ✅ matches
+- "how does **activation** work?" → ✅ matches
+- "how do I **activate** a skill?" → ❌ no match ("activate" ≠ "activation")
+- "how does it work?" → ❌ no match
 
-**Fix:** Adjust glob patterns or add the missing path
+**Fix:** add the variations people actually type, or cover them with an intent
+pattern instead.
 
-#### 2. Excluded by pathExclusions
+### 2. Intent Patterns Too Specific
 
-**Check:**
-- Are you editing a test file?
-- Look at `fileTriggers.pathExclusions`
+**Check:** `promptTriggers.intentPatterns`. Test the regex both at
+https://regex101.com/ and against the real hook.
 
-**Example:**
 ```json
-"pathExclusions": [
-  "**/*.test.ts",
-  "**/*.spec.ts"
-]
+"intentPatterns": ["(create|add).*?(new skill file)"]
 ```
-- Editing: `services/user.test.ts` → ❌ Excluded
-- Editing: `services/user.ts` → ✅ Not excluded
+- "create a new skill file" → ✅ matches
+- "add a skill" → ❌ doesn't match
 
-**Fix:** If test exclusion too broad, narrow it or remove
-
-#### 3. Content Pattern Not Found
-
-**Check:**
-- Does the file actually contain the pattern?
-- Look at `fileTriggers.contentPatterns`
-- Is the regex correct?
-
-**Example:**
+**Fix:** broaden it:
 ```json
-"contentPatterns": [
-  "import.*[Pp]risma"
-]
+"intentPatterns": ["(create|add).*?skill"]
 ```
-- File has: `import { PrismaService } from './prisma'` → ✅ Matches
-- File has: `import { Database } from './db'` → ❌ Doesn't match
 
-**Debug:**
+### 3. Invalid Regex (Fails Silently)
+
+A pattern that doesn't compile is caught by the hook and treated as "no match".
+It never raises an error. If a pattern seems inert, verify it compiles:
+
 ```bash
-# Check if pattern exists in file
-grep -i "prisma" path/to/file.ts
+jq -n '"test string" | test("your(pattern")'
 ```
 
-**Fix:** Adjust content patterns or add missing imports
+**Fix:** correct the pattern. Watch for unbalanced parentheses and brackets, and
+for backslashes that need doubling inside a JSON string (`\\.` not `\.`).
 
-#### 4. Session Already Used Skill
+### 4. Skill Name Doesn't Match the Skill Tool
 
-**Check session state:**
-```bash
-ls .claude/hooks/state/
-cat .claude/hooks/state/skills-used-{session-id}.json
+The name is used verbatim in the suggestion, so a wrong name produces a
+suggestion Claude cannot act on. Plugin skills need the plugin-qualified form.
+
+```yaml
+# SKILL.md
+name: skill-developer
 ```
-
-**Example:**
 ```json
-{
-  "skills_used": ["database-verification"],
-  "files_verified": []
-}
+// skill-rules.json — for a skill shipped by the coordkit plugin
+"coordkit:skill-developer": { }
 ```
 
-If the skill is in `skills_used`, it won't block again in this session.
+**Fix:** use exactly the name the Skill tool accepts.
 
-**Fix:** Delete the state file to reset:
-```bash
-rm .claude/hooks/state/skills-used-{session-id}.json
-```
+### 5. JSON Syntax Error
 
-#### 5. File Marker Present
+See [First: The Silence Problem](#first-the-silence-problem). Common causes:
+trailing commas, single quotes, missing quotes on keys, unescaped backslashes.
 
-**Check file for skip marker:**
-```bash
-grep "@skip-validation" path/to/file.ts
-```
+### 6. Entry in the Wrong Place
 
-If found, the file is permanently skipped.
+Every skill must live under the top-level `skills` object. An entry placed at
+the root of the file is silently ignored.
 
-**Fix:** Remove the marker if verification is needed again
+### 7. The Prompt Was a Slash Command
 
-#### 6. Environment Variable Override
+The hook returns early for any prompt starting with `/` — a slash command
+already names its skill. This is intended, not a bug.
 
-**Check:**
-```bash
-echo $SKIP_DB_VERIFICATION
-echo $SKIP_SKILL_GUARDRAILS
-```
+### 8. Overridden by the Project Layer
 
-If set, the skill is disabled.
-
-**Fix:** Unset the environment variable:
-```bash
-unset SKIP_DB_VERIFICATION
-```
-
-#### Debug Command
-
-Test the hook manually:
-
-```bash
-cat <<'EOF' | npx tsx .claude/hooks/skill-verification-guard.ts 2>&1
-{
-  "session_id": "debug",
-  "tool_name": "Edit",
-  "tool_input": {"file_path": "/root/git/your-project/form/src/services/user.ts"}
-}
-EOF
-echo "Exit code: $?"
-```
-
-Expected:
-- Exit code 2 + stderr message if should block
-- Exit code 0 + no output if should allow
+A project `skill-rules.json` entry **replaces** the global entry of the same
+name outright. If a global skill stopped firing in one repo, check whether that
+repo's file redefines it with narrower triggers.
 
 ---
 
 ## False Positives
 
-**Symptoms:** Skill triggers when it shouldn't.
-
-**Common Causes & Solutions:**
+**Symptoms:** the skill is suggested on prompts that have nothing to do with it.
 
 ### 1. Keywords Too Generic
 
 **Problem:**
 ```json
-"keywords": ["user", "system", "create"]  // Too broad
+"keywords": ["user", "system", "create"]
 ```
-- Triggers on: "user manual", "file system", "create directory"
+Fires on "user manual", "file system", "create directory". Worse, because
+matching is substring-based, `"user"` also matches "users", "superuser" and
+"perused".
 
-**Solution:** Make keywords more specific
+**Solution:** be specific, and prefer phrases.
 ```json
-"keywords": [
-  "user authentication",
-  "user tracking",
-  "create feature"
-]
+"keywords": ["user authentication", "user tracking"]
 ```
 
 ### 2. Intent Patterns Too Broad
 
 **Problem:**
 ```json
-"intentPatterns": [
-  "(create)"  // Matches everything with "create"
-]
+"intentPatterns": ["(create)"]
 ```
-- Triggers on: "create file", "create folder", "create account"
 
-**Solution:** Add context to patterns
+**Solution:** add context.
 ```json
-"intentPatterns": [
-  "(create|add).*?(database|table|feature)"  // More specific
-]
+"intentPatterns": ["(create|add).*?(skill|trigger|rule)"]
 ```
 
-**Advanced:** Use negative lookaheads to exclude
-```regex
-(create)(?!.*test).*?(feature)  // Don't match if "test" appears
-```
+### 3. Suggestion Noise Across a Long Conversation
 
-### 3. File Paths Too Generic
+The hook is stateless — it re-evaluates every prompt independently and has no
+memory of what it suggested last turn. A skill matching an ongoing topic will be
+suggested on *every* turn of that conversation.
 
-**Problem:**
-```json
-"pathPatterns": [
-  "form/**"  // Matches everything in form/
-]
-```
-- Triggers on: test files, config files, everything
+**Solution:** narrow the keywords so they match the moment the skill is
+genuinely needed rather than the topic in general, or drop the entry's priority
+so it appears lower in the block.
 
-**Solution:** Use narrower patterns
-```json
-"pathPatterns": [
-  "form/src/services/**/*.ts",  // Only service files
-  "form/src/controllers/**/*.ts"
-]
-```
+### 4. Right Skill, Too Loud
 
-### 4. Content Patterns Catching Unrelated Code
-
-**Problem:**
-```json
-"contentPatterns": [
-  "Prisma"  // Matches in comments, strings, etc.
-]
-```
-- Triggers on: `// Don't use Prisma here`
-- Triggers on: `const note = "Prisma is cool"`
-
-**Solution:** Make patterns more specific
-```json
-"contentPatterns": [
-  "import.*[Pp]risma",        // Only imports
-  "PrismaService\\.",         // Only actual usage
-  "prisma\\.(findMany|create)" // Specific methods
-]
-```
-
-### 5. Adjust Enforcement Level
-
-**Last resort:** If false positives are frequent:
-
-```json
-{
-  "enforcement": "block"  // Change to "suggest"
-}
-```
-
-This makes it advisory instead of blocking.
+If a skill is genuinely relevant but shouldn't dominate, lower its `priority`
+from `critical`/`high` to `medium`/`low`. Note that lowering it does not reduce
+how often it fires — only which heading it appears under.
 
 ---
 
 ## Hook Not Executing
 
-**Symptoms:** Hook doesn't run at all - no suggestion, no block.
+**Symptoms:** nothing happens even for a prompt you have verified matches when
+running the script by hand.
 
-**Common Causes:**
+### 1. `jq` Not Installed
 
-### 1. Hook Not Registered
+This is the most common cause. The hook's first act is to check for `jq` and
+exit silently if it's missing.
 
-**Check `.claude/settings.json`:**
 ```bash
-cat .claude/settings.json | jq '.hooks.UserPromptSubmit'
-cat .claude/settings.json | jq '.hooks.PreToolUse'
+command -v jq && jq --version
 ```
 
-Expected: Hook entries present
+**Fix:** install `jq` (`apt install jq`, `brew install jq`, …).
 
-**Fix:** Add missing hook registration:
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/skill-activation-prompt.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+### 2. Neither Rules File Exists
 
-### 2. Bash Wrapper Not Executable
-
-**Check:**
 ```bash
-ls -l .claude/hooks/*.sh
+ls -l ~/.claude/skills/skill-rules.json
+ls -l "$CLAUDE_PROJECT_DIR/.claude/skills/skill-rules.json"
 ```
 
-Expected: `-rwxr-xr-x` (executable)
-
-**Fix:**
+**Fix:** copy the template:
 ```bash
-chmod +x .claude/hooks/*.sh
+cp plugins/coordkit/templates/skill-rules.example.json \
+   ~/.claude/skills/skill-rules.json
 ```
 
-### 3. Incorrect Shebang
+### 3. Hook Not Registered
 
-**Check:**
+The hook is registered by the plugin, in
+`plugins/coordkit/hooks/hooks.json`:
+
 ```bash
-head -1 .claude/hooks/skill-activation-prompt.sh
+jq '.hooks.UserPromptSubmit' plugins/coordkit/hooks/hooks.json
 ```
 
-Expected: `#!/bin/bash`
+Expected: an entry invoking `bash ${CLAUDE_PLUGIN_ROOT}/scripts/skill-activation.sh`.
 
-**Fix:** Add correct shebang to first line
+**Fix:** if it's absent, the plugin install is incomplete — reinstall coordkit
+rather than hand-editing settings.
 
-### 4. npx/tsx Not Available
+### 4. Script Missing or Unreadable
 
-**Check:**
 ```bash
-npx tsx --version
+ls -l plugins/coordkit/scripts/skill-activation.sh
 ```
 
-Expected: Version number
+The hook is invoked as `bash <script>`, so the file does not need its executable
+bit set — but it does need to exist and be readable.
 
-**Fix:** Install dependencies:
+### 5. `CLAUDE_PROJECT_DIR` Not What You Expect
+
+The project rules path is built from `$CLAUDE_PROJECT_DIR`, falling back to
+`$PWD`. In a git worktree or a nested repo, that may not be the directory you
+assume.
+
 ```bash
-cd .claude/hooks
-npm install
+echo "${CLAUDE_PROJECT_DIR:-$PWD}"
 ```
-
-### 5. TypeScript Compilation Error
-
-**Check:**
-```bash
-cd .claude/hooks
-npx tsc --noEmit skill-activation-prompt.ts
-```
-
-Expected: No output (no errors)
-
-**Fix:** Correct TypeScript syntax errors
 
 ---
 
 ## Performance Issues
 
-**Symptoms:** Hooks are slow, noticeable delay before prompt/edit.
+**Symptoms:** a noticeable delay before each prompt is processed.
 
-**Common Causes:**
+The hook runs one `jq` process and re-reads both rules files on every prompt.
+`hooks.json` gives it a 5-second timeout; the target is under 100ms.
 
-### 1. Too Many Patterns
+### 1. Too Many Entries or Patterns
 
-**Check:**
-- Count patterns in skill-rules.json
-- Each pattern = regex compilation + matching
+Every entry's keywords and patterns are evaluated on every prompt.
 
-**Solution:** Reduce patterns
-- Combine similar patterns
-- Remove redundant patterns
-- Use more specific patterns (faster matching)
+**Solution:** prune unused skills from the rules file; combine near-duplicate
+patterns; prefer keywords over regex where either would do.
 
 ### 2. Complex Regex
 
@@ -458,57 +259,27 @@ Expected: No output (no errors)
 ```regex
 (create|add|modify|update|implement|build).*?(feature|endpoint|route|service|controller|component|UI|page)
 ```
-- Long alternations = slow
+Long alternations on both sides of a wildcard backtrack badly on long prompts.
 
-**Solution:** Simplify
+**Solution:** simplify.
 ```regex
-(create|add).*?(feature|endpoint)  // Fewer alternatives
+(create|add).*?(feature|endpoint)
 ```
 
-### 3. Too Many Files Checked
+Avoid nested quantifiers (`(a+)+`) entirely — they are the classic catastrophic
+backtracking shape, and a long pasted prompt is exactly the input that triggers it.
 
-**Problem:**
-```json
-"pathPatterns": [
-  "**/*.ts"  // Checks ALL TypeScript files
-]
-```
-
-**Solution:** Be more specific
-```json
-"pathPatterns": [
-  "form/src/services/**/*.ts",  // Only specific directory
-  "form/src/controllers/**/*.ts"
-]
-```
-
-### 4. Large Files
-
-Content pattern matching reads entire file - slow for large files.
-
-**Solution:**
-- Only use content patterns when necessary
-- Consider file size limits (future enhancement)
-
-### Measure Performance
+### Measure It
 
 ```bash
-# UserPromptSubmit
-time echo '{"prompt":"test"}' | npx tsx .claude/hooks/skill-activation-prompt.ts
-
-# PreToolUse
-time cat <<'EOF' | npx tsx .claude/hooks/skill-verification-guard.ts
-{"tool_name":"Edit","tool_input":{"file_path":"test.ts"}}
-EOF
+time (echo '{"prompt":"test"}' | bash plugins/coordkit/scripts/skill-activation.sh)
 ```
 
-**Target metrics:**
-- UserPromptSubmit: < 100ms
-- PreToolUse: < 200ms
+**Target:** < 100ms.
 
 ---
 
 **Related Files:**
 - [SKILL.md](SKILL.md) - Main skill guide
-- [HOOK_MECHANISMS.md](HOOK_MECHANISMS.md) - How hooks work
+- [HOOK_MECHANISMS.md](HOOK_MECHANISMS.md) - How the hook works
 - [SKILL_RULES_REFERENCE.md](SKILL_RULES_REFERENCE.md) - Configuration reference

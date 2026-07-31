@@ -1,10 +1,17 @@
 # Common Patterns Library
 
-Ready-to-use regex and glob patterns for skill triggers. Copy and customize for your skills.
+Ready-to-use keyword and regex patterns for `promptTriggers`. Copy and customize
+for your skills.
+
+All of these match against the **text of the user's prompt** — that is the only
+thing coordkit's skill-activation hook sees. Glob and file-content patterns have
+no equivalent here; see [TRIGGER_TYPES.md](TRIGGER_TYPES.md).
 
 ---
 
 ## Intent Patterns (Regex)
+
+Case-insensitive. Use non-greedy `.*?` between the verb group and the noun group.
 
 ### Feature/Endpoint Creation
 ```regex
@@ -18,7 +25,7 @@ Ready-to-use regex and glob patterns for skill triggers. Copy and customize for 
 
 ### Database Work
 ```regex
-(add|create|modify|update).*?(user|table|column|field|schema|migration)
+(add|create|modify|update).*?(table|column|field|schema|migration)
 (database|prisma).*?(change|update|query)
 ```
 
@@ -30,13 +37,15 @@ Ready-to-use regex and glob patterns for skill triggers. Copy and customize for 
 
 ### Explanation Requests
 ```regex
-(how does|how do|explain|what is|describe|tell me about).*?
+(how does|how do|explain|what is|describe|tell me about).*?(your-topic|synonym)
 ```
 
-### Workflow Operations
+Note the trailing group: a bare `(how does|explain).*?` matches essentially every
+question a user asks, and will suggest your skill constantly.
+
+### Debugging an Existing Thing
 ```regex
-(create|add|modify|update).*?(workflow|step|branch|condition)
-(debug|troubleshoot|fix).*?workflow
+(debug|troubleshoot|fix|why (is|isn't)).*?(your-topic)
 ```
 
 ### Testing
@@ -46,102 +55,64 @@ Ready-to-use regex and glob patterns for skill triggers. Copy and customize for 
 
 ---
 
-## File Path Patterns (Glob)
+## Keyword Lists
 
-### Frontend
-```glob
-frontend/src/**/*.tsx        # All React components
-frontend/src/**/*.ts         # All TypeScript files
-frontend/src/components/**   # Only components directory
+Keywords are case-insensitive substrings with no word boundaries, so favour
+multi-word phrases and distinctive identifiers over short common words.
+
+### Good: distinctive and specific
+```json
+"keywords": [
+  "skill-rules.json",
+  "skill activation",
+  "hooks.json",
+  "UserPromptSubmit"
+]
 ```
 
-### Backend Services
-```glob
-form/src/**/*.ts            # Form service
-email/src/**/*.ts           # Email service
-users/src/**/*.ts           # Users service
-projects/src/**/*.ts        # Projects service
+### Bad: fires on unrelated prompts
+```json
+"keywords": ["user", "create", "system", "file"]
 ```
 
-### Database
-```glob
-**/schema.prisma            # Prisma schema (anywhere)
-**/migrations/**/*.sql      # Migration files
-database/src/**/*.ts        # Database scripts
-```
+`"user"` alone also matches "users", "superuser" and "perused"; `"create"`
+matches almost any request to make something.
 
-### Workflows
-```glob
-form/src/workflow/**/*.ts              # Workflow engine
-form/src/workflow-definitions/**/*.json # Workflow definitions
-```
-
-### Test Exclusions
-```glob
-**/*.test.ts                # TypeScript tests
-**/*.test.tsx               # React component tests
-**/*.spec.ts                # Spec files
-```
+### Pattern: filenames and identifiers
+Exact filenames, config keys, and API names make excellent keywords — they are
+long, distinctive, and people type them verbatim when they need the skill.
 
 ---
 
-## Content Patterns (Regex)
-
-### Prisma/Database
-```regex
-import.*[Pp]risma                # Prisma imports
-PrismaService                    # PrismaService usage
-prisma\.                         # prisma.something
-\.findMany\(                     # Prisma query methods
-\.create\(
-\.update\(
-\.delete\(
-```
-
-### Controllers/Routes
-```regex
-export class.*Controller         # Controller classes
-router\.                         # Express router
-app\.(get|post|put|delete|patch) # Express app routes
-```
-
-### Error Handling
-```regex
-try\s*\{                        # Try blocks
-catch\s*\(                      # Catch blocks
-throw new                        # Throw statements
-```
-
-### React/Components
-```regex
-export.*React\.FC               # React functional components
-export default function.*       # Default function exports
-useState|useEffect              # React hooks
-```
-
----
-
-**Usage Example:**
+## Usage Example
 
 ```json
 {
-  "my-skill": {
-    "promptTriggers": {
-      "intentPatterns": [
-        "(create|add|build).*?(component|UI|page)"
-      ]
-    },
-    "fileTriggers": {
-      "pathPatterns": [
-        "frontend/src/**/*.tsx"
-      ],
-      "contentPatterns": [
-        "export.*React\\.FC",
-        "useState|useEffect"
-      ]
+  "skills": {
+    "my-skill": {
+      "type": "domain",
+      "enforcement": "suggest",
+      "priority": "medium",
+      "description": "Guidance for building UI components",
+      "promptTriggers": {
+        "keywords": [
+          "design system",
+          "component library"
+        ],
+        "intentPatterns": [
+          "(create|add|build).*?(component|UI|page)"
+        ]
+      }
     }
   }
 }
+```
+
+Verify it before relying on it:
+
+```bash
+echo '{"prompt":"build a new modal component"}' \
+  | bash plugins/coordkit/scripts/skill-activation.sh
 ```
 
 ---

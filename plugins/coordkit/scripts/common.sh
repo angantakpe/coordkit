@@ -88,13 +88,45 @@ ck_coord_toml() {
 # would resolve some components to the PARENT while others resolved to the nested
 # repo. The ancestor-.coordkit-bus probe is what lets a non-git subdir join a
 # parent bus, so it must stay ahead of the project-dir fallback.
+#
+# "git toplevel" here means the MAIN checkout's root, not the linked worktree's
+# own root — see ck_main_worktree.
 # --------------------------------------------------------------------------- #
+
+# Canonicalize a linked git worktree to the MAIN checkout's root.
+#
+# WHY: `rev-parse --show-toplevel` inside a linked worktree returns that
+# worktree's own root, so every worktree would mint its own empty
+# .coordkit-bus/ and be invisible to the sessions in the main checkout — a real
+# bug where a worktree session's `bus.sh msg` reported "delivered to 0
+# instances". Since CONCURRENCY.md tells sessions to work in worktrees, all
+# worktrees of a repo MUST agree on one bus root.
+#
+# `git worktree list --porcelain` always lists the main worktree first, and it
+# stays correct under separate-git-dir setups where deriving the root from
+# --git-common-dir would not. Prints nothing if the main worktree can't be
+# determined (old git, bare main repo) so the caller keeps the old behaviour.
+ck_main_worktree() {
+  local cwd="$1" line path
+  line="$(git -C "$cwd" worktree list --porcelain 2>/dev/null | head -n 2)" || return 1
+  case "$line" in worktree\ /*) ;; *) return 1 ;; esac
+  # A bare main repo has no checkout to host the bus — let the caller fall back.
+  case "$line" in *$'\n'bare*) return 1 ;; esac
+  path="${line%%$'\n'*}"; path="${path#worktree }"
+  [ -d "$path" ] || return 1
+  printf '%s' "$path"
+}
+
 resolve_root() {
-  local cwd="$1" top dir
+  local cwd="$1" top main dir
   # explicit pin wins over everything — lets sibling non-git subdirs share one bus
   if ck_first_env COORDKIT_BUS_ROOT CLAUDE_BUS_ROOT CODEX_BUS_ROOT GEMINI_BUS_ROOT; then return; fi
   top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
-  if [ -n "$top" ]; then printf '%s' "$top"; return; fi
+  if [ -n "$top" ]; then
+    main="$(ck_main_worktree "$cwd")"
+    printf '%s' "${main:-$top}"
+    return
+  fi
   dir="$cwd"
   while [ -n "$dir" ] && [ "$dir" != "/" ]; do
     [ -d "$dir/.coordkit-bus" ] && { printf '%s' "$dir"; return; }

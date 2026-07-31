@@ -1,13 +1,15 @@
 ---
 name: skill-developer
-description: Create and manage Claude Code skills following Anthropic best practices. Use when creating new skills, modifying skill-rules.json, understanding trigger patterns, working with hooks, debugging skill activation, or implementing progressive disclosure. Covers skill structure, YAML frontmatter, trigger types (keywords, intent patterns, file paths, content patterns), enforcement levels (block, suggest, warn), hook mechanisms (UserPromptSubmit, PreToolUse), session tracking, and the 500-line rule.
+description: Create and manage Claude Code skills following Anthropic best practices. Use when creating new skills, modifying skill-rules.json, understanding trigger patterns, working with hooks, debugging skill activation, or implementing progressive disclosure. Covers skill structure, YAML frontmatter, prompt trigger types (keywords, intent patterns), priority levels, coordkit's UserPromptSubmit skill-activation hook, and the 500-line rule.
 ---
 
 # Skill Developer Guide
 
 ## Purpose
 
-Comprehensive guide for creating and managing skills in Claude Code with auto-activation system, following Anthropic's official best practices including the 500-line rule and progressive disclosure pattern.
+Guide for creating and managing skills in Claude Code, and for wiring them into
+coordkit's skill auto-activation hook. Follows Anthropic's official best
+practices including the 500-line rule and progressive disclosure.
 
 ## When to Use This Skill
 
@@ -27,54 +29,73 @@ Automatically activates when you mention:
 
 ## System Overview
 
-### Two-Hook Architecture
+### Single-Hook Architecture
 
-**1. UserPromptSubmit Hook** (Proactive Suggestions)
-- **File**: `.claude/hooks/skill-activation-prompt.ts`
-- **Trigger**: BEFORE Claude sees user's prompt
-- **Purpose**: Suggest relevant skills based on keywords + intent patterns
-- **Method**: Injects formatted reminder as context (stdout → Claude's input)
-- **Use Cases**: Topic-based skills, implicit work detection
+coordkit's skill auto-activation is one dependency-free bash script wired to one
+hook event. There is no TypeScript, no `npx tsx`, no Stop hook, and no
+PreToolUse blocking of edits on behalf of a skill.
 
-**2. Stop Hook - Error Handling Reminder** (Gentle Reminders)
-- **File**: `.claude/hooks/error-handling-reminder.ts`
-- **Trigger**: AFTER Claude finishes responding
-- **Purpose**: Gentle reminder to self-assess error handling in code written
-- **Method**: Analyzes edited files for risky patterns, displays reminder if needed
-- **Use Cases**: Error handling awareness without blocking friction
+**UserPromptSubmit Hook** (proactive suggestions)
+- **Script**: `plugins/coordkit/scripts/skill-activation.sh` (bash + `jq`)
+- **Registration**: `plugins/coordkit/hooks/hooks.json`, under `UserPromptSubmit`
+- **Trigger**: before Claude sees the user's prompt
+- **Purpose**: suggest relevant skills based on keywords + intent patterns
+- **Method**: prints a plain-text reminder block on **stdout**, which Claude Code
+  injects as context for the turn. It does *not* emit a JSON
+  `hookSpecificOutput` wrapper.
+- **Exit code**: always `0` — the hook never blocks anything, in line with
+  coordkit's WARN-only philosophy.
 
-**Philosophy Change (2025-10-27):** We moved away from blocking PreToolUse for Sentry/error handling. Instead, use gentle post-response reminders that don't block workflow but maintain code quality awareness.
+**Behaviour worth knowing:**
+- If `jq` is not installed, the hook exits silently and does nothing.
+- Prompts starting with `/` are skipped — a slash command already names its skill.
+- Matching is case-insensitive (the prompt is lowercased before matching).
+- If nothing matches, the hook prints nothing.
+
+Note that coordkit registers *other* hooks in the same `hooks.json`
+(`SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd`) — those belong to the
+coordination bus and anti-clobber guard (`coord.sh`), not to skill activation.
+`skill-activation.sh` is stateless and independent of them.
 
 ### Configuration File
 
-**Location**: `.claude/skills/skill-rules.json`
+Rules are layered, and both layers use the same schema:
 
-Defines:
-- All skills and their trigger conditions
-- Enforcement levels (block, suggest, warn)
-- File path patterns (glob)
-- Content detection patterns (regex)
-- Skip conditions (session tracking, file markers, env vars)
+1. **Global**: `~/.claude/skills/skill-rules.json`
+2. **Project**: `$CLAUDE_PROJECT_DIR/.claude/skills/skill-rules.json`
+
+Both files are read; their `skills` objects are merged, and a project entry
+**overrides** the global entry with the same skill name. If neither file exists,
+the hook does nothing.
+
+A starting point ships at `plugins/coordkit/templates/skill-rules.example.json`.
+
+Each entry defines:
+- The skill name **exactly as the Skill tool invokes it** (use the
+  plugin-qualified form for plugin skills, e.g. `coordkit:skill-developer`)
+- `type`, `priority`, `description`
+- `promptTriggers.keywords` (substring match) and
+  `promptTriggers.intentPatterns` (regex)
+
+`enforcement` is accepted in the schema but is **reserved** — v1 is suggest-only
+and every match is rendered as a suggestion regardless of its value.
 
 ---
 
 ## Skill Types
 
+`type` is descriptive metadata for humans reading the rules file; it does not
+change hook behaviour today.
+
 ### 1. Guardrail Skills
 
-**Purpose:** Enforce critical best practices that prevent errors
+**Purpose:** flag critical best practices that prevent errors
 
 **Characteristics:**
 - Type: `"guardrail"`
-- Enforcement: `"block"`
-- Priority: `"critical"` or `"high"`
-- Block file edits until skill used
-- Prevent common mistakes (column names, critical errors)
-- Session-aware (don't repeat nag in same session)
-
-**Examples:**
-- `database-verification` - Verify table/column names before Prisma queries
-- `frontend-dev-guidelines` - Enforce React/TypeScript patterns
+- Priority: `"critical"` or `"high"` — surfaces under the
+  "⚠️ CRITICAL SKILLS (REQUIRED)" or "📚 RECOMMENDED SKILLS" heading
+- Advisory in practice: the hook suggests, it does not block the edit
 
 **When to Use:**
 - Mistakes that cause runtime errors
@@ -83,20 +104,12 @@ Defines:
 
 ### 2. Domain Skills
 
-**Purpose:** Provide comprehensive guidance for specific areas
+**Purpose:** provide comprehensive guidance for a specific area
 
 **Characteristics:**
 - Type: `"domain"`
-- Enforcement: `"suggest"`
-- Priority: `"high"` or `"medium"`
-- Advisory, not mandatory
-- Topic or domain-specific
-- Comprehensive documentation
-
-**Examples:**
-- `backend-dev-guidelines` - Node.js/Express/TypeScript patterns
-- `frontend-dev-guidelines` - React/TypeScript best practices
-- `error-tracking` - Sentry integration guidance
+- Priority: `"high"`, `"medium"` or `"low"`
+- Topic or domain-specific, comprehensive documentation
 
 **When to Use:**
 - Complex systems requiring deep knowledge
@@ -110,7 +123,9 @@ Defines:
 
 ### Step 1: Create Skill File
 
-**Location:** `.claude/skills/{skill-name}/SKILL.md`
+**Location:** `.claude/skills/{skill-name}/SKILL.md` (project skill),
+`~/.claude/skills/{skill-name}/SKILL.md` (global), or a plugin's `skills/`
+directory.
 
 **Template:**
 ```markdown
@@ -140,18 +155,21 @@ The actual guidance, documentation, patterns, examples
 
 ### Step 2: Add to skill-rules.json
 
-See [SKILL_RULES_REFERENCE.md](SKILL_RULES_REFERENCE.md) for complete schema.
+See [SKILL_RULES_REFERENCE.md](SKILL_RULES_REFERENCE.md) for the complete schema.
 
 **Basic Template:**
 ```json
 {
-  "my-new-skill": {
-    "type": "domain",
-    "enforcement": "suggest",
-    "priority": "medium",
-    "promptTriggers": {
-      "keywords": ["keyword1", "keyword2"],
-      "intentPatterns": ["(create|add).*?something"]
+  "skills": {
+    "my-new-skill": {
+      "type": "domain",
+      "enforcement": "suggest",
+      "priority": "medium",
+      "description": "One line, for humans reading this file",
+      "promptTriggers": {
+        "keywords": ["keyword1", "keyword2"],
+        "intentPatterns": ["(create|add).*?something"]
+      }
     }
   }
 }
@@ -159,26 +177,22 @@ See [SKILL_RULES_REFERENCE.md](SKILL_RULES_REFERENCE.md) for complete schema.
 
 ### Step 3: Test Triggers
 
-**Test UserPromptSubmit:**
+Feed the hook a prompt on stdin, exactly as Claude Code would:
+
 ```bash
-echo '{"session_id":"test","prompt":"your test prompt"}' | \
-  npx tsx .claude/hooks/skill-activation-prompt.ts
+echo '{"prompt":"your test prompt"}' \
+  | bash plugins/coordkit/scripts/skill-activation.sh
 ```
 
-**Test PreToolUse:**
-```bash
-cat <<'EOF' | npx tsx .claude/hooks/skill-verification-guard.ts
-{"session_id":"test","tool_name":"Edit","tool_input":{"file_path":"test.ts"}}
-EOF
-```
+A match prints the "SKILL ACTIVATION CHECK" block; no match prints nothing.
+Validate the rules file itself with `jq . ~/.claude/skills/skill-rules.json`.
 
 ### Step 4: Refine Patterns
 
 Based on testing:
 - Add missing keywords
 - Refine intent patterns to reduce false positives
-- Adjust file path patterns
-- Test content patterns against actual files
+- Re-run the test command above against several realistic prompts
 
 ### Step 5: Follow Anthropic Best Practices
 
@@ -191,78 +205,34 @@ Based on testing:
 
 ---
 
-## Enforcement Levels
+## Priority Levels
 
-### BLOCK (Critical Guardrails)
+`priority` decides which heading a matched skill appears under in the injected
+reminder. It does not change enforcement — everything is a suggestion.
 
-- Physically prevents Edit/Write tool execution
-- Exit code 2 from hook, stderr → Claude
-- Claude sees message and must use skill to proceed
-- **Use For**: Critical mistakes, data integrity, security issues
+| Priority   | Heading in the injected block     |
+| ---------- | --------------------------------- |
+| `critical` | ⚠️ CRITICAL SKILLS (REQUIRED)      |
+| `high`     | 📚 RECOMMENDED SKILLS              |
+| `medium`   | 💡 SUGGESTED SKILLS (the default)  |
+| `low`      | 📌 OPTIONAL SKILLS                 |
 
-**Example:** Database column name verification
-
-### SUGGEST (Recommended)
-
-- Reminder injected before Claude sees prompt
-- Claude is aware of relevant skills
-- Not enforced, just advisory
-- **Use For**: Domain guidance, best practices, how-to guides
-
-**Example:** Frontend development guidelines
-
-### WARN (Optional)
-
-- Low priority suggestions
-- Advisory only, minimal enforcement
-- **Use For**: Nice-to-have suggestions, informational reminders
-
-**Rarely used** - most skills are either BLOCK or SUGGEST.
+An entry with no `priority` is treated as `medium`.
 
 ---
 
-## Skip Conditions & User Control
+## Turning Activation Off
 
-### 1. Session Tracking
+There is no per-skill skip marker, session state, or opt-out environment
+variable — the hook is stateless and holds no memory between prompts. To stop a
+skill being suggested, remove or narrow its entry in `skill-rules.json`. To
+disable activation entirely, remove the rules files (or the
+`skill-activation.sh` entry from `hooks.json`).
 
-**Purpose:** Don't nag repeatedly in same session
-
-**How it works:**
-- First edit → Hook blocks, updates session state
-- Second edit (same session) → Hook allows
-- Different session → Blocks again
-
-**State File:** `.claude/hooks/state/skills-used-{session_id}.json`
-
-### 2. File Markers
-
-**Purpose:** Permanent skip for verified files
-
-**Marker:** `// @skip-validation`
-
-**Usage:**
-```typescript
-// @skip-validation
-import { PrismaService } from './prisma';
-// This file has been manually verified
-```
-
-**NOTE:** Use sparingly - defeats the purpose if overused
-
-### 3. Environment Variables
-
-**Purpose:** Emergency disable, temporary override
-
-**Global disable:**
-```bash
-export SKIP_SKILL_GUARDRAILS=true  # Disables ALL PreToolUse blocks
-```
-
-**Skill-specific:**
-```bash
-export SKIP_DB_VERIFICATION=true
-export SKIP_ERROR_REMINDER=true
-```
+Because the hook re-evaluates every prompt independently, a skill whose keywords
+match a long-running topic will be suggested on *every* turn of that
+conversation. If that is noisy, tighten the keywords or move the concept into an
+`intentPatterns` regex.
 
 ---
 
@@ -270,19 +240,15 @@ export SKIP_ERROR_REMINDER=true
 
 When creating a new skill, verify:
 
-- [ ] Skill file created in `.claude/skills/{name}/SKILL.md`
+- [ ] Skill file created at `{skills-dir}/{name}/SKILL.md`
 - [ ] Proper frontmatter with name and description
-- [ ] Entry added to `skill-rules.json`
+- [ ] Entry added to `skill-rules.json` under `skills`
+- [ ] Skill name matches what the Skill tool expects (plugin-qualified if a plugin skill)
 - [ ] Keywords tested with real prompts
 - [ ] Intent patterns tested with variations
-- [ ] File path patterns tested with actual files
-- [ ] Content patterns tested against file contents
-- [ ] Block message is clear and actionable (if guardrail)
-- [ ] Skip conditions configured appropriately
 - [ ] Priority level matches importance
 - [ ] No false positives in testing
 - [ ] No false negatives in testing
-- [ ] Performance is acceptable (<100ms or <200ms)
 - [ ] JSON syntax validated: `jq . skill-rules.json`
 - [ ] **SKILL.md under 500 lines** ⭐
 - [ ] Reference files created if needed
@@ -295,34 +261,28 @@ When creating a new skill, verify:
 For detailed information on specific topics, see:
 
 ### [TRIGGER_TYPES.md](TRIGGER_TYPES.md)
-Complete guide to all trigger types:
+Complete guide to the supported trigger types:
 - Keyword triggers (explicit topic matching)
 - Intent patterns (implicit action detection)
-- File path triggers (glob patterns)
-- Content patterns (regex in files)
 - Best practices and examples for each
 - Common pitfalls and testing strategies
 
 ### [SKILL_RULES_REFERENCE.md](SKILL_RULES_REFERENCE.md)
 Complete skill-rules.json schema:
-- Full TypeScript interface definitions
 - Field-by-field explanations
-- Complete guardrail skill example
-- Complete domain skill example
+- Complete guardrail and domain examples
 - Validation guide and common errors
 
 ### [HOOK_MECHANISMS.md](HOOK_MECHANISMS.md)
 Deep dive into hook internals:
-- UserPromptSubmit flow (detailed)
-- PreToolUse flow (detailed)
-- Exit code behavior table (CRITICAL)
-- Session state management
+- The UserPromptSubmit flow, step by step
+- How the rules layers are merged
+- Exit code and output-stream behaviour
 - Performance considerations
 
 ### [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-Comprehensive debugging guide:
-- Skill not triggering (UserPromptSubmit)
-- PreToolUse not blocking
+Debugging guide:
+- Skill not triggering
 - False positives (too many triggers)
 - Hook not executing at all
 - Performance issues
@@ -330,16 +290,13 @@ Comprehensive debugging guide:
 ### [PATTERNS_LIBRARY.md](PATTERNS_LIBRARY.md)
 Ready-to-use pattern collection:
 - Intent pattern library (regex)
-- File path pattern library (glob)
-- Content pattern library (regex)
-- Organized by use case
-- Copy-paste ready
+- Keyword library
+- Organized by use case, copy-paste ready
 
 ### [ADVANCED.md](ADVANCED.md)
 Future enhancements and ideas:
 - Dynamic rule updates
 - Skill dependencies
-- Conditional enforcement
 - Skill analytics
 - Skill versioning
 
@@ -349,32 +306,18 @@ Future enhancements and ideas:
 
 ### Create New Skill (5 Steps)
 
-1. Create `.claude/skills/{name}/SKILL.md` with frontmatter
-2. Add entry to `.claude/skills/skill-rules.json`
-3. Test with `npx tsx` commands
+1. Create `{skills-dir}/{name}/SKILL.md` with frontmatter
+2. Add an entry to `skill-rules.json`
+3. Test with `echo '{"prompt":"..."}' | bash .../skill-activation.sh`
 4. Refine patterns based on testing
 5. Keep SKILL.md under 500 lines
 
 ### Trigger Types
 
-- **Keywords**: Explicit topic mentions
-- **Intent**: Implicit action detection
-- **File Paths**: Location-based activation
-- **Content**: Technology-specific detection
+- **Keywords**: explicit topic mentions (case-insensitive substring)
+- **Intent patterns**: implicit action detection (case-insensitive regex)
 
 See [TRIGGER_TYPES.md](TRIGGER_TYPES.md) for complete details.
-
-### Enforcement
-
-- **BLOCK**: Exit code 2, critical only
-- **SUGGEST**: Inject context, most common
-- **WARN**: Advisory, rarely used
-
-### Skip Conditions
-
-- **Session tracking**: Automatic (prevents repeated nags)
-- **File markers**: `// @skip-validation` (permanent skip)
-- **Env vars**: `SKIP_SKILL_GUARDRAILS` (emergency disable)
 
 ### Anthropic Best Practices
 
@@ -388,39 +331,25 @@ See [TRIGGER_TYPES.md](TRIGGER_TYPES.md) for complete details.
 
 ### Troubleshoot
 
-Test hooks manually:
+Test the hook manually:
 ```bash
-# UserPromptSubmit
-echo '{"prompt":"test"}' | npx tsx .claude/hooks/skill-activation-prompt.ts
-
-# PreToolUse
-cat <<'EOF' | npx tsx .claude/hooks/skill-verification-guard.ts
-{"tool_name":"Edit","tool_input":{"file_path":"test.ts"}}
-EOF
+echo '{"prompt":"test"}' | bash plugins/coordkit/scripts/skill-activation.sh
 ```
 
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for complete debugging guide.
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the complete debugging guide.
 
 ---
 
 ## Related Files
 
 **Configuration:**
-- `.claude/skills/skill-rules.json` - Master configuration
-- `.claude/hooks/state/` - Session tracking
-- `.claude/settings.json` - Hook registration
+- `~/.claude/skills/skill-rules.json` - global rules
+- `<project>/.claude/skills/skill-rules.json` - project rules (override global)
+- `plugins/coordkit/templates/skill-rules.example.json` - starting template
+- `plugins/coordkit/hooks/hooks.json` - hook registration
 
-**Hooks:**
-- `.claude/hooks/skill-activation-prompt.ts` - UserPromptSubmit
-- `.claude/hooks/error-handling-reminder.ts` - Stop event (gentle reminders)
+**Hook:**
+- `plugins/coordkit/scripts/skill-activation.sh` - UserPromptSubmit, suggest-only
 
-**All Skills:**
-- `.claude/skills/*/SKILL.md` - Skill content files
-
----
-
-**Skill Status**: COMPLETE - Restructured following Anthropic best practices ✅
-**Line Count**: < 500 (following 500-line rule) ✅
-**Progressive Disclosure**: Reference files for detailed information ✅
-
-**Next**: Create more skills, refine patterns based on usage
+**Skill content:**
+- `{skills-dir}/*/SKILL.md`

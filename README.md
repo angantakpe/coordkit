@@ -10,7 +10,7 @@ It ships **one plugin**:
 
 | Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **coordkit** | 4.0.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard + skill auto-activation. Tracks who else is live in a repo, which files they touch, and which subagents they're running, and surfaces it so parallel sessions can reconcile instead of stepping on each other and duplicating work — and, where you ask for it, *denies* an edit that would clobber theirs. Also matches prompts against layered `skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders, and ships a shared roster of specialized agents and the `/dev-docs` context-persistence commands. |
+| **coordkit** | 4.2.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard + skill auto-activation. Tracks who else is live in a repo, which files they touch, and which subagents they're running, and surfaces it so parallel sessions can reconcile instead of stepping on each other and duplicating work — and, where you ask for it, *denies* an edit that would clobber theirs. Also matches prompts against layered `skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders, and ships a shared roster of specialized agents and the `/dev-docs` context-persistence commands. |
 
 > **`coordguard` and `skillkit` have both been merged in.** Through 2.x, the
 > hard anti-clobber blocker shipped as a separate `coordguard` package. As of
@@ -156,8 +156,9 @@ own axis:
 
 1. **Distribution / packaging** *(this README, the marketplace, plugin manifests,
    hook wiring)* — how the system is installed, versioned, and updated. The
-   coordkit `version` (currently `3.0.0`) is the tooling-version axis. The
-   2.3.0 → 3.0.0 major bump is a change on *this axis only* — folding coordguard
+   coordkit `version` (see `plugins/coordkit/.claude-plugin/plugin.json`) is the
+   tooling-version axis. The 2.3.0 → 3.0.0 major bump was a change on *this axis
+   only* — folding coordguard
    in changed the hook surface and the safety contract, and deliberately did not
    touch layers 2 and 3. Guard mode keeps its own state and emits no events, so
    the on-disk event format and the delivery mechanism are byte-identical to

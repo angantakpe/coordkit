@@ -87,12 +87,53 @@ mode="DRY RUN (pass --apply to delete)"; [ "$APPLY" = 1 ] && mode="APPLY"
 #      you can look at .claude-bus/ledger.jsonl yourself before deciding to
 #      remove it (nothing in it survives a `--nuke`-equivalent decision here
 #      automatically; that stays a manual call).
+#
+# The check-then-mv in case 1 is NOT atomic on its own. Any live instance's
+# ensure_dirs() creates .coordkit-bus/ as a side effect of `mkdir -p`, and if it
+# lands between the check and the mv, POSIX `mv srcdir destdir` stops being a
+# rename and moves .claude-bus/ INSIDE .coordkit-bus/ — state silently orphaned
+# at .coordkit-bus/.claude-bus/, where case 2 doesn't look. migrate_legacy_dir()
+# therefore re-checks under a lock, prefers GNU `mv -T` (which refuses to
+# descend into a populated dir), and — on any mv — verifies afterwards that the
+# nested path didn't appear, undoing and failing loudly if it did.
+migrate_legacy_dir() {
+  local base="${legacy##*/}" nested
+  nested="${bus}/${base}"
+  if [ -e "$bus" ]; then
+    echo "gc: ${bus} appeared while migrating — another instance seeded the bus" >&2
+    echo "gc: concurrently. NOT migrating; re-run gc to reconcile ${legacy} by hand." >&2
+    return 1
+  fi
+  if mv --version >/dev/null 2>&1; then
+    mv -T "$legacy" "$bus" 2>/dev/null || {
+      echo "gc: failed to migrate ${legacy} -> ${bus} (does ${bus} now exist?)" >&2
+      return 1
+    }
+  else
+    mv "$legacy" "$bus" 2>/dev/null || {
+      echo "gc: failed to migrate ${legacy} -> ${bus}" >&2
+      return 1
+    }
+    if [ -e "$nested" ]; then
+      mv "$nested" "$legacy" 2>/dev/null
+      echo "gc: RACE: ${bus} was created by another instance mid-migration, so" >&2
+      echo "gc: ${legacy} landed INSIDE it. Moved it back out to ${legacy}." >&2
+      echo "gc: Reconcile the two dirs by hand — gc will not retry automatically." >&2
+      return 1
+    fi
+  fi
+  rm -f "${bus}/.gc-migrate.lock" 2>/dev/null
+  echo "gc: migrated ${legacy} -> ${bus}"
+}
+
 if [ -d "$legacy" ]; then
   if [ ! -e "$bus" ]; then
     echo "gc: found legacy bus dir ${legacy}, no ${bus} yet — ${mode}"
     if [ "$APPLY" = 1 ]; then
-      mv "$legacy" "$bus" && echo "gc: migrated ${legacy} -> ${bus}" \
-        || echo "gc: failed to migrate ${legacy} -> ${bus}" >&2
+      # Lock lives inside the legacy dir so gc-vs-gc is serialized without
+      # dropping a stray lock file in the repo root; it travels with the mv and
+      # is removed once the migration lands.
+      ( flock 9; migrate_legacy_dir ) 9>"${legacy}/.gc-migrate.lock"
     else
       echo "gc: would rename ${legacy} -> ${bus}. Add --apply to do it."
     fi
@@ -195,9 +236,13 @@ if [ -f "$log" ]; then
   if [ "$lines" -gt "$TRIM_AT" ] && [ "$lines" -gt "$KEEP" ]; then
     trimmed=$(( lines - KEEP ))
     if [ "$APPLY" = 1 ]; then
-      tail -n "$KEEP" "$log" > "${log}.gc.tmp" 2>/dev/null \
-        && mv "${log}.gc.tmp" "$log" 2>/dev/null \
-        || { rm -f "${log}.gc.tmp" 2>/dev/null; trimmed=0; }
+      # tail-then-mv drops any line appended between the read and the rename
+      # (the append targets the old inode). TODO: bus.sh's own `>>` append to
+      # activity.log should take this same ${log}.lock to fully close the race.
+      ( flock 9
+        tail -n "$KEEP" "$log" > "${log}.gc.tmp" 2>/dev/null \
+          && mv "${log}.gc.tmp" "$log" 2>/dev/null
+      ) 9>"${log}.lock" || { rm -f "${log}.gc.tmp" 2>/dev/null; trimmed=0; }
     fi
   fi
 fi

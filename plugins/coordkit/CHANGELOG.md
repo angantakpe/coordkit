@@ -17,6 +17,37 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## Unreleased
+
+### Fixed
+- **Linked worktrees now share the main checkout's bus.** Bus-root resolution
+  follows a worktree's `.git` file back to the main checkout instead of creating
+  a second, isolated `.coordkit-bus/` per worktree, so sibling instances working
+  in worktrees of the same repo see each other.
+- **`bus.sh` tracks `NotebookEdit`** alongside `Write`/`Edit`, so notebook edits
+  no longer go unrecorded in the file-touch view.
+- **`bus.sh`'s claim-key hashing falls back to `shasum`/`md5`** when `sha1sum`
+  is unavailable (macOS), instead of silently collapsing every file's claim
+  onto the same key.
+- **`init-git.sh` reads the correct bus-directory environment variable**, so
+  git-transport initialization lands in the configured bus root.
+- **`gc.sh`'s legacy-bus migration is race-safe.** Migrating a pre-4.0.0
+  `.claude-bus/` directory can no longer collide with a live instance writing to
+  it.
+- **`ledger.sh` delta injection tolerates malformed lines** instead of aborting
+  the whole injection on one bad record.
+- **Torn-line race in the git transport's sync path** — partially written
+  segments can no longer be read or replicated mid-append.
+- **`migrate.sh` goes through the LogStore abstraction** rather than writing the
+  log directly, so migrations respect locking and seq allocation.
+
+### Changed
+- Corrected stale ordering-guarantee wording in the transport layer and event
+  schema docs, which described guarantees the implementation does not make.
+- README no longer states a stale plugin version: the comparison table matches
+  the shipped version and the three-layers section points at
+  `plugins/coordkit/.claude-plugin/plugin.json` instead of hardcoding a number.
+
 ## 4.2.0
 
 ### Added

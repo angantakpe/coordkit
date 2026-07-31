@@ -12,14 +12,20 @@
 # puts bin/ on PATH.
 set -uo pipefail
 
-# Resolve this script's real path (readlink -f, with a fallback) so a symlinked
-# entrypoint still resolves the plugin root from the actual file, not the link.
-__self="$0"
-if command -v readlink >/dev/null 2>&1; then
-  __r="$(readlink -f "$0" 2>/dev/null)" && [ -n "$__r" ] && __self="$__r"
+# Bootstrap: locate common.sh from this script's real path (readlink -f, with a
+# fallback, so a symlinked entrypoint resolves from the actual file, not the
+# link). This is the irreducible minimum — the plugin-root env chain itself
+# lives in common.sh's ck_runtime_root() and must not be re-spelled here.
+__self="$(readlink -f "$0" 2>/dev/null)"; [ -n "$__self" ] || __self="$0"
+__common="$(cd "$(dirname "$__self")/../scripts" 2>/dev/null && pwd)/common.sh"
+if [ ! -f "$__common" ]; then
+  echo "cobus: coordkit runtime not found: $__common" >&2
+  exit 127
 fi
+# shellcheck source=../scripts/common.sh
+. "$__common"
 
-ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}}}}"
+ROOT="$(ck_runtime_root)"
 LEDGER="${ROOT}/scripts/ledger.sh"
 
 usage() {

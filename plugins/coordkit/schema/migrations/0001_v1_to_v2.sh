@@ -15,6 +15,13 @@
 #   - lease (number/0)                  => object { until } | null   (never a bare scalar in v2)
 #   - all other fields preserved verbatim; refs/tags defaulted to []
 #
+# OUTPUT MUST REPLACE THE V1 SOURCE LINES — NEVER BE APPENDED ALONGSIDE THEM.
+# The eid minted below is a hash of the raw v1 line, whereas transports/lib.sh's
+# __dedup_by_eid falls back to "raw:<base64(line)>" for eid-less legacy lines.
+# Two different keys for the same logical event: if both the v1 line and its
+# lifted v2 counterpart reach the dedup pass, neither key matches the other and
+# the event is counted twice.
+#
 # Hash: prefers b3sum (blake3), falls back to sha256sum.
 set -uo pipefail
 

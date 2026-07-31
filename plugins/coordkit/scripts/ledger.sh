@@ -216,6 +216,9 @@ ledger_emit() {  # append one prebuilt JSON line (logstore-aware)
   else printf '%s\n' "$1" >> "$LWRITE" 2>/dev/null; fi
 }
 
+# NOTE: the emitted top-level `ts` is write-only — no read path in this file
+# consumes it (ordering and cursors key off .seq, leases off .lease.until). Kept
+# for human `jq` debugging and external consumers; do not assume it is unused.
 _ck_emit_v2() {  # seq type subject body refs tags lease -> one v2 JSON line on stdout
   local seq="$1" type="$2" subject="$3" body="$4" refs="$5" tags="$6" lease="$7"
   local actor p c lease_obj base eid id hasher="sha256" hcmd="sha256sum"
@@ -289,6 +292,7 @@ max_seq() {
 # append_event TYPE SUBJECT BODY [REFS_JSON] [TAGS_JSON] [LEASE]
 # Helpers read type/subject/body/refs/tags/lease/seq from the caller's scope
 # (bash dynamic scoping) so they work both inside and outside the flock subshell.
+# As in _ck_emit_v2: `ts` here is write-only — nothing in this file reads it.
 _ae_build_line() {
   if [ "${COORDKIT_EMIT_V2:-0}" = 1 ]; then
     _ck_emit_v2 "$seq" "$type" "$subject" "$body" "$refs" "$tags" "$lease"
@@ -586,7 +590,13 @@ build_digest() {  # $1 = cursor seq (events strictly greater are "new")
   fi
 
   # 2) delta since this instance's cursor — paginated
-  delta="$(jq -c --argjson c "$cur" 'select(.seq > $c)' "$ledger" 2>/dev/null)"
+  # Tolerant read (same idiom as ensure_proj/recent_decisions/open_questions): a
+  # bare `jq -c` over the file aborts on the FIRST malformed line and, with the
+  # error swallowed, would silently yield an empty delta while set_cursor still
+  # advances past the unseen events — permanently hiding them.
+  delta="$(jq -Rrn --argjson c "$cur" '
+    inputs | (try fromjson catch null) | select(type=="object")
+    | select(.seq > $c) | tojson' "$ledger" 2>/dev/null)"
   if [ -n "$delta" ]; then
     n="$(printf '%s\n' "$delta" | grep -c . )"
     out+="🆕 ${n} new event(s) since you last looked"
@@ -654,7 +664,11 @@ case "$phase" in
       # effect is that after a cross-replica merge a few already-seen events may be
       # re-surfaced once. eid (content hash) is the durable dedup key if a future
       # pass wants exactly-once injection.
-      delta="$(jq -c --argjson c "$cur" --arg me "$sid" 'select(.seq > $c and (.sid != $me))' "$ledger" 2>/dev/null)"
+      # Tolerant read — see the matching note in build_digest: one malformed line
+      # must skip that line, not abort the whole delta.
+      delta="$(jq -Rrn --argjson c "$cur" --arg me "$sid" '
+        inputs | (try fromjson catch null) | select(type=="object")
+        | select(.seq > $c and (.sid != $me)) | tojson' "$ledger" 2>/dev/null)"
       if [ -n "$delta" ]; then
         body="🧠 New shared-context events from other instances:"$'\n'
         # ONE jq for the whole page (was four per event, on every single turn).

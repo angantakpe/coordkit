@@ -176,6 +176,24 @@ __logstore_actor_of() {
 #              keep deterministic input order. Missing fields default to (0,0,"").
 # Both are single jq processes — pure, deterministic, and fast. Lines that don't
 # parse as JSON objects are kept verbatim (dedup by content, ordered at the front).
+#
+# WHAT THIS ORDER ACTUALLY IS (and its known limitation). `clock.p` is wall-clock
+# MILLISECONDS, stamped locally by whichever machine emitted the event; `clock.c` is
+# a plain per-actor monotonic counter that is never reconciled against peers (see
+# schema/event.schema.json — Lamport-style cross-replica advancement is not
+# implemented). Sorting primarily by `clock.p` therefore IS, across different actors,
+# wall-clock last-writer-wins: two contributors whose machine clocks disagree will see
+# their events interleaved by that skew, and `clock.c`/`actor` only break EXACT-
+# millisecond ties. Within a single actor the order is correct and stable (its own
+# clock is its own). This is a KNOWN LIMITATION, not a solved problem — the order is
+# deterministic (every replica computes the same sequence from the same input) but it
+# is NOT skew-independent. Fixing it means real Lamport/hybrid clocks, which would
+# change only the emitter; this comparator would keep working unchanged.
+#
+# This IS the read path. Every logstore_readall / logstore_since / logstore_watermark
+# call, in every mode, orders through __total_order. The `seq` field is not consulted
+# anywhere in the transport layer; it remains a local-only convenience counter that
+# ledger.sh uses for its own projections and cursors.
 # --------------------------------------------------------------------------- #
 
 __dedup_by_eid() {

@@ -1,13 +1,18 @@
 # Trigger Types - Complete Guide
 
-Complete reference for configuring skill triggers in Claude Code's skill auto-activation system.
+Complete reference for configuring skill triggers in coordkit's skill
+auto-activation system.
+
+coordkit matches on the **text of the user's prompt only**. There are two
+trigger types, both living under `promptTriggers`: keywords and intent patterns.
+File-path and file-content triggers are not supported — the hook never sees a
+file path. See [HOOK_MECHANISMS.md](HOOK_MECHANISMS.md) for why.
 
 ## Table of Contents
 
 - [Keyword Triggers (Explicit)](#keyword-triggers-explicit)
 - [Intent Pattern Triggers (Implicit)](#intent-pattern-triggers-implicit)
-- [File Path Triggers](#file-path-triggers)
-- [Content Pattern Triggers](#content-pattern-triggers)
+- [Choosing Between Them](#choosing-between-them)
 - [Best Practices Summary](#best-practices-summary)
 
 ---
@@ -16,31 +21,34 @@ Complete reference for configuring skill triggers in Claude Code's skill auto-ac
 
 ### How It Works
 
-Case-insensitive substring matching in user's prompt.
+Case-insensitive substring matching against the user's prompt. Both the prompt
+and the keyword are lowercased before comparison, and there is **no word
+boundary** — the keyword `"grid"` also matches "gridlock".
 
 ### Use For
 
-Topic-based activation where user explicitly mentions the subject.
+Topic-based activation where the user explicitly mentions the subject.
 
 ### Configuration
 
 ```json
 "promptTriggers": {
-  "keywords": ["layout", "grid", "toolbar", "submission"]
+  "keywords": ["skill rules", "skill-rules.json", "skill activation"]
 }
 ```
 
 ### Example
 
-- User prompt: "how does the **layout** system work?"
-- Matches: "layout" keyword
-- Activates: `project-catalog-developer`
+- User prompt: "how do I change the **skill activation** rules?"
+- Matches: the `"skill activation"` keyword
+- Suggests: `coordkit:skill-developer`
 
 ### Best Practices
 
-- Use specific, unambiguous terms
-- Include common variations ("layout", "layout system", "grid layout")
-- Avoid overly generic words ("system", "work", "create")
+- Use specific, unambiguous terms — preferably multi-word phrases
+- Include common variations ("skill rules", "skill-rules.json")
+- Avoid generic words ("system", "work", "create"), which fire on every prompt
+- Remember substrings match inside other words; prefer longer keywords
 - Test with real prompts
 
 ---
@@ -49,213 +57,78 @@ Topic-based activation where user explicitly mentions the subject.
 
 ### How It Works
 
-Regex pattern matching to detect user's intent even when they don't mention the topic explicitly.
+Case-insensitive regex matching against the prompt, to catch the user's intent
+even when they never name the topic. Patterns are evaluated by `jq`'s
+`test($re; "i")`, so the syntax is Oniguruma (a superset of POSIX ERE that
+supports the usual Perl-style shorthands). A pattern that fails to compile is
+caught and treated as "no match" — silently, so test yours.
 
 ### Use For
 
-Action-based activation where user describes what they want to do rather than the specific topic.
+Action-based activation, where the user describes what they want to do rather
+than the specific topic.
 
 ### Configuration
 
 ```json
 "promptTriggers": {
   "intentPatterns": [
-    "(create|add|implement).*?(feature|endpoint)",
-    "(how does|explain).*?(layout|workflow)"
+    "(create|add|build|write).*?skill",
+    "(how does|explain).*?(hook|activation)"
   ]
 }
 ```
 
 ### Examples
 
-**Database Work:**
-- User prompt: "add user tracking feature"
-- Matches: `(add).*?(feature)`
-- Activates: `database-verification`, `error-tracking`
+**Skill authoring:**
+- User prompt: "add a new one of those auto-triggering things"
+- Matches: `(create|add|build|write).*?skill` — only if "skill" appears; this one
+  would *not* match, which is exactly the kind of gap to find by testing
 
-**Component Creation:**
-- User prompt: "create a dashboard widget"
-- Matches: `(create).*?(component)` (if component in pattern)
-- Activates: `frontend-dev-guidelines`
+**Debugging:**
+- User prompt: "why isn't my skill triggering?"
+- Matches: `skill.*?(trigger|activate|not activating)`
 
 ### Best Practices
 
 - Capture common action verbs: `(create|add|modify|build|implement)`
-- Include domain-specific nouns: `(feature|endpoint|component|workflow)`
-- Use non-greedy matching: `.*?` instead of `.*`
-- Test patterns thoroughly with regex tester (https://regex101.com/)
-- Don't make patterns too broad (causes false positives)
-- Don't make patterns too specific (causes false negatives)
+- Include domain-specific nouns: `(hook|trigger|skill|rule)`
+- Use non-greedy matching: `.*?` rather than `.*`
+- Test patterns with a regex tester (https://regex101.com/) **and** against the
+  real hook — see below
+- Don't make patterns too broad (false positives on every prompt)
+- Don't make them too specific (they never fire)
 
-### Common Pattern Examples
+### Common Pattern Shapes
 
 ```regex
-# Database Work
-(add|create|implement).*?(user|login|auth|feature)
-
 # Explanations
-(how does|explain|what is|describe).*?
+(how does|how do|explain|what is|describe).*?(topic|other-topic)
 
-# Frontend Work
-(create|add|make|build).*?(component|UI|page|modal|dialog)
+# Creation
+(create|add|make|build|implement).*?(thing|other-thing)
 
-# Error Handling
-(fix|handle|catch|debug).*?(error|exception|bug)
+# Debugging
+(fix|debug|why (is|isn't)|troubleshoot).*?(error|failing|not working)
 
-# Workflow Operations
-(create|add|modify).*?(workflow|step|branch|condition)
+# Modification
+(modify|update|change|rename).*?(config|rule|setting)
 ```
 
 ---
 
-## File Path Triggers
+## Choosing Between Them
 
-### How It Works
+| Situation                                        | Use              |
+| ------------------------------------------------ | ---------------- |
+| The user will name the topic outright            | `keywords`       |
+| A distinctive filename or identifier is involved | `keywords`       |
+| The user describes an action, not the topic      | `intentPatterns` |
+| You need several near-synonyms in one rule       | `intentPatterns` |
 
-Glob pattern matching against the file path being edited.
-
-### Use For
-
-Domain/area-specific activation based on file location in the project.
-
-### Configuration
-
-```json
-"fileTriggers": {
-  "pathPatterns": [
-    "frontend/src/**/*.tsx",
-    "form/src/**/*.ts"
-  ],
-  "pathExclusions": [
-    "**/*.test.ts",
-    "**/*.spec.ts"
-  ]
-}
-```
-
-### Glob Pattern Syntax
-
-- `**` = Any number of directories (including zero)
-- `*` = Any characters within a directory name
-- Examples:
-  - `frontend/src/**/*.tsx` = All .tsx files in frontend/src and subdirs
-  - `**/schema.prisma` = schema.prisma anywhere in project
-  - `form/src/**/*.ts` = All .ts files in form/src subdirs
-
-### Example
-
-- File being edited: `frontend/src/components/Dashboard.tsx`
-- Matches: `frontend/src/**/*.tsx`
-- Activates: `frontend-dev-guidelines`
-
-### Best Practices
-
-- Be specific to avoid false positives
-- Use exclusions for test files: `**/*.test.ts`
-- Consider subdirectory structure
-- Test patterns with actual file paths
-- Use narrower patterns when possible: `form/src/services/**` not `form/**`
-
-### Common Path Patterns
-
-```glob
-# Frontend
-frontend/src/**/*.tsx        # All React components
-frontend/src/**/*.ts         # All TypeScript files
-frontend/src/components/**   # Only components directory
-
-# Backend Services
-form/src/**/*.ts            # Form service
-email/src/**/*.ts           # Email service
-users/src/**/*.ts           # Users service
-
-# Database
-**/schema.prisma            # Prisma schema (anywhere)
-**/migrations/**/*.sql      # Migration files
-database/src/**/*.ts        # Database scripts
-
-# Workflows
-form/src/workflow/**/*.ts              # Workflow engine
-form/src/workflow-definitions/**/*.json # Workflow definitions
-
-# Test Exclusions
-**/*.test.ts                # TypeScript tests
-**/*.test.tsx               # React component tests
-**/*.spec.ts                # Spec files
-```
-
----
-
-## Content Pattern Triggers
-
-### How It Works
-
-Regex pattern matching against the file's actual content (what's inside the file).
-
-### Use For
-
-Technology-specific activation based on what the code imports or uses (Prisma, controllers, specific libraries).
-
-### Configuration
-
-```json
-"fileTriggers": {
-  "contentPatterns": [
-    "import.*[Pp]risma",
-    "PrismaService",
-    "\\.findMany\\(",
-    "\\.create\\("
-  ]
-}
-```
-
-### Examples
-
-**Prisma Detection:**
-- File contains: `import { PrismaService } from '@project/database'`
-- Matches: `import.*[Pp]risma`
-- Activates: `database-verification`
-
-**Controller Detection:**
-- File contains: `export class UserController {`
-- Matches: `export class.*Controller`
-- Activates: `error-tracking`
-
-### Best Practices
-
-- Match imports: `import.*[Pp]risma` (case-insensitive with [Pp])
-- Escape special regex chars: `\\.findMany\\(` not `.findMany(`
-- Patterns use case-insensitive flag
-- Test against real file content
-- Make patterns specific enough to avoid false matches
-
-### Common Content Patterns
-
-```regex
-# Prisma/Database
-import.*[Pp]risma                # Prisma imports
-PrismaService                    # PrismaService usage
-prisma\.                         # prisma.something
-\.findMany\(                     # Prisma query methods
-\.create\(
-\.update\(
-\.delete\(
-
-# Controllers/Routes
-export class.*Controller         # Controller classes
-router\.                         # Express router
-app\.(get|post|put|delete|patch) # Express app routes
-
-# Error Handling
-try\s*\{                        # Try blocks
-catch\s*\(                      # Catch blocks
-throw new                        # Throw statements
-
-# React/Components
-export.*React\.FC               # React functional components
-export default function.*       # Default function exports
-useState|useEffect              # React hooks
-```
+A skill matches if **any** keyword **or any** pattern matches, so most entries
+usefully carry both.
 
 ---
 
@@ -263,39 +136,30 @@ useState|useEffect              # React hooks
 
 ### DO:
 ✅ Use specific, unambiguous keywords
-✅ Test all patterns with real examples
+✅ Test every pattern with real prompts
 ✅ Include common variations
 ✅ Use non-greedy regex: `.*?`
-✅ Escape special characters in content patterns
-✅ Add exclusions for test files
-✅ Make file path patterns narrow and specific
+✅ Prefer multi-word keywords over single common words
 
 ### DON'T:
 ❌ Use overly generic keywords ("system", "work")
 ❌ Make intent patterns too broad (false positives)
 ❌ Make patterns too specific (false negatives)
-❌ Forget to test with regex tester (https://regex101.com/)
+❌ Assume a bad regex will error — it just silently never matches
 ❌ Use greedy regex: `.*` instead of `.*?`
-❌ Match too broadly in file paths
 
 ### Testing Your Triggers
 
-**Test keyword/intent triggers:**
+Feed the hook a prompt exactly as Claude Code would:
+
 ```bash
-echo '{"session_id":"test","prompt":"your test prompt"}' | \
-  npx tsx .claude/hooks/skill-activation-prompt.ts
+echo '{"prompt":"your test prompt"}' \
+  | bash plugins/coordkit/scripts/skill-activation.sh
 ```
 
-**Test file path/content triggers:**
-```bash
-cat <<'EOF' | npx tsx .claude/hooks/skill-verification-guard.ts
-{
-  "session_id": "test",
-  "tool_name": "Edit",
-  "tool_input": {"file_path": "/path/to/test/file.ts"}
-}
-EOF
-```
+A match prints the "SKILL ACTIVATION CHECK" block naming your skill; no match
+prints nothing. Test both the prompts that *should* fire it and a few that
+should not.
 
 ---
 

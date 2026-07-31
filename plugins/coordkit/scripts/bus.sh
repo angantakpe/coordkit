@@ -80,6 +80,20 @@ iso()  { date '+%Y-%m-%d %H:%M:%S'; }
 hhmm() { date '+%H:%M:%S'; }
 mtime(){ stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 
+# Filesystem-safe key for a path, mirroring guard.sh's _guard_hashkey: try the
+# hashers that actually exist on this box (Linux ships sha1sum/md5sum; macOS
+# only shasum/md5), then fall back to the sanitized path. Hardcoding sha1sum
+# would yield an EMPTY key on macOS, collapsing every file's claim onto one
+# path and silently breaking collision detection.
+hashkey() {
+  local f="$1" k=""
+  k="$(printf '%s' "$f" | sha1sum 2>/dev/null | cut -d' ' -f1)"; [ -n "$k" ] && { printf '%s' "$k"; return; }
+  k="$(printf '%s' "$f" | shasum  2>/dev/null | cut -d' ' -f1)"; [ -n "$k" ] && { printf '%s' "$k"; return; }
+  k="$(printf '%s' "$f" | md5sum  2>/dev/null | cut -d' ' -f1)"; [ -n "$k" ] && { printf '%s' "$k"; return; }
+  k="$(printf '%s' "$f" | md5     2>/dev/null)";                 [ -n "$k" ] && { printf '%s' "$k"; return; }
+  printf '%s' "$f" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-200
+}
+
 # resolve_root() / branch_of() — canonical implementations, shared with the
 # ledger, the transports and the CLI entrypoints so no two of them can ever
 # resolve a different .coordkit-bus tree. The host runtime may inject
@@ -133,7 +147,7 @@ prune_dead() {
   for f in "$agents"/*.json; do
     [ -e "$f" ] || continue
     last="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$last" ] && last=0
-    [ $(( t - last )) -gt "$STALE_HARD" ] && rm -f "$f" 2>/dev/null
+    [ $(( t - last )) -gt "$STALE_HARD" ] && rm -f "$f" "${f}.lock" 2>/dev/null
   done
   # Also drop claims whose owning session has no live agent record. `stop`
   # releases a session's claims, but a crashed/killed session never runs it,
@@ -158,17 +172,25 @@ heartbeat() {  # $1=task (or "") $2=file-to-append (or "")
   ensure_dirs || return 0
   local rec="${agents}/${sid}.json" task_set="${1:-}" file_add="${2:-}"
   local t br prev='{}'; t="$(now)"; br="$curbr"
-  [ -f "$rec" ] && prev="$(cat "$rec" 2>/dev/null || printf '{}')"
-  printf '%s' "$prev" | jq \
-    --arg sid "$sid" --arg br "$br" --arg cwd "$cwd" \
-    --argjson t "$t" --arg task "$task_set" --arg file "$file_add" '
-      . as $p
-      | {sid:$sid, branch:$br, cwd:$cwd, last_seen:$t}
-      + {task:  ( if $task != "" then $task else ($p.task // "") end )}
-      + {files: ( ($p.files // [])
-                  | if $file != "" then (. + [$file]) else . end
-                  | reverse | unique | .[0:8] )}
-    ' > "${rec}.tmp" 2>/dev/null && mv "${rec}.tmp" "$rec" 2>/dev/null
+  # tmp+mv makes each WRITE atomic, but read-then-write isn't: two callers for
+  # the same sid (e.g. the statusline badge tick racing a hook heartbeat) can
+  # both read the old record and the loser's field update is lost. Serialize the
+  # whole read-modify-write under a per-sid lock (same flock idiom as common.sh's
+  # ck_clock_c) so unrelated sessions' heartbeats stay independent.
+  ( flock 9
+    [ -f "$rec" ] && prev="$(cat "$rec" 2>/dev/null || printf '{}')"
+    printf '%s' "$prev" | jq \
+      --arg sid "$sid" --arg br "$br" --arg cwd "$cwd" \
+      --argjson t "$t" --arg task "$task_set" --arg file "$file_add" '
+        . as $p
+        | {sid:$sid, branch:$br, cwd:$cwd, last_seen:$t}
+        + {task:  ( if $task != "" then $task else ($p.task // "") end )}
+        + {files: ( ($p.files // [])
+                    | if $file != "" then (. + [$file]) else . end
+                    | reverse | unique | .[0:8] )}
+      ' > "${rec}.tmp" 2>/dev/null && mv "${rec}.tmp" "$rec" 2>/dev/null
+  ) 9>"${rec}.lock" 2>/dev/null
+  return 0
 }
 
 agent_age()    { local f="${agents}/$1.json" l; l="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$l" ] && l=0; echo $(( $(now) - l )); }
@@ -300,15 +322,16 @@ case "$phase" in
   # ── PostToolUse feed ──────────────────────────────────────────────────────
   record)
     tn="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)"
-    file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)"
+    # NotebookEdit names its target `notebook_path`, not `file_path` (same as guard.sh).
+    file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)"
     cmd="$(printf '%s' "$input"  | jq -r '.tool_input.command // empty' 2>/dev/null)"
     ensure_dirs || exit 0
     case "$tn" in
-      Write|Edit)
+      Write|Edit|NotebookEdit)
         [ -z "$file" ] && exit 0
         rel="${file#$root/}"; heartbeat "" "$rel"
         printf '%s\t%s\tedit\t%s\n' "$(iso)" "$sid8" "$rel" >> "$log" 2>/dev/null
-        key="$(printf '%s' "$file" | sha1sum | cut -d' ' -f1)"
+        key="$(hashkey "$file")"
         jq -n --arg p "$rel" --arg sid "$sid" --argjson ts "$(now)" \
           '{path:$p, sid:$sid, ts:$ts}' > "${claims}/${key}.json" 2>/dev/null ;;
       Read)
@@ -330,9 +353,9 @@ case "$phase" in
 
   # ── PreToolUse soft collision warning (+ desktop notify, debounced) ───────
   check)
-    file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)"
+    file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)"
     [ -z "$file" ] && exit 0
-    key="$(printf '%s' "$file" | sha1sum | cut -d' ' -f1)"
+    key="$(hashkey "$file")"
     cf="${claims}/${key}.json"; [ -f "$cf" ] || exit 0
     IFS=$'\t' read -r owner cts <<< "$(jq -r '[.sid // "", .ts // 0] | @tsv' "$cf" 2>/dev/null)"
     { [ -z "$owner" ] || [ "$owner" = "$sid" ]; } && exit 0
@@ -363,7 +386,19 @@ case "$phase" in
   subagent-start)
     ensure_dirs || exit 0
     tid="$(printf '%s' "$input" | jq -r '.tool_use_id // empty' 2>/dev/null)"
-    [ -z "$tid" ] && exit 0
+    # Subagent records are keyed on tool_use_id — a host that doesn't provide it
+    # can't have its subagents paired start->stop, so tracking degrades to off
+    # for this call. Leave a breadcrumb in the feed so it isn't a silent no-op
+    # (guard.sh instead falls back to a single shared slot; that works there
+    # because it only needs ONE snapshot, not one record per concurrent call).
+    if [ -z "$tid" ]; then
+      # once per session: this phase doesn't cap the log, so don't append per call
+      if [ ! -e "${bus}/.no-tid-${sid}" ]; then
+        : > "${bus}/.no-tid-${sid}" 2>/dev/null
+        printf '%s\t%s\tsubagent\t(tracking off: host provided no tool_use_id)\n' "$(iso)" "$sid8" >> "$log" 2>/dev/null
+      fi
+      exit 0
+    fi
     stype="$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)"
     sdesc="$(printf '%s' "$input" | jq -r '.tool_input.description // empty' 2>/dev/null)"
     heartbeat "" ""
@@ -406,7 +441,7 @@ case "$phase" in
   # assistant turn, which would drop the heartbeat + release claims mid-session
   # and make the instance invisible to /bus for most of its life.
   stop)
-    rm -f "${agents}/${sid}.json" 2>/dev/null
+    rm -f "${agents}/${sid}.json" "${agents}/${sid}.json.lock" "${bus}/.no-tid-${sid}" 2>/dev/null
     for cf in "$claims"/*.json; do
       [ -e "$cf" ] || continue
       [ "$(jq -r '.sid // ""' "$cf" 2>/dev/null)" = "$sid" ] && rm -f "$cf" 2>/dev/null
@@ -504,17 +539,23 @@ case "$phase" in
   msg)
     shift; target="${1:-}"; shift || true; text="$*"
     { [ -z "$target" ] || [ -z "$text" ]; } && { echo "usage: bus.sh msg <all|sid8|branch:name> <text>"; exit 0; }
+    # ensure_dirs stays: it's cheap, idempotent, and the delivery path below
+    # needs inbox/ to exist. It can only create a phantom tree at a root that
+    # has no bus yet — which is exactly the case the 0-delivered diagnostic
+    # below now names explicitly.
     ensure_dirs || exit 0
-    [ -d "$agents" ] || { echo "no live agents"; exit 0; }
+    [ -d "$agents" ] || { echo "📭 no agent records at this bus root (${root})."; exit 1; }
     sender="branch:${curbr} ($(basename "$root"))"
     stamp="$(printf 'from %s @%s: %s' "$sender" "$(hhmm)" "$text")"
-    delivered=0
+    delivered=0 seen=0 stale=0 live_desc=""
     for f in "$agents"/*.json; do
       [ -e "$f" ] || continue
       s="$(jq -r '.sid // ""' "$f" 2>/dev/null)"; [ -z "$s" ] && continue
+      seen=$(( seen + 1 ))
       l="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$l" ] && l=0
-      [ $(( $(now) - l )) -gt "$STALE_HARD" ] && continue
+      [ $(( $(now) - l )) -gt "$STALE_HARD" ] && { stale=$(( stale + 1 )); continue; }
       br="$(jq -r '.branch // ""' "$f" 2>/dev/null)"
+      live_desc+="${live_desc:+, }${s:0:8}(branch:${br:-?})"
       hit=0
       case "$target" in
         all) hit=1 ;;
@@ -532,8 +573,21 @@ case "$phase" in
         delivered=$(( delivered + 1 ))
       fi
     done
-    echo "📨 delivered to ${delivered} instance(s): $text"
-    exit 0
+    if [ "$delivered" -gt 0 ]; then
+      echo "📨 delivered to ${delivered} instance(s): $text"
+      exit 0
+    fi
+    # 0 delivered is a failure, and the reason matters: an empty bus root, a bus
+    # full of dead sessions, and a live bus where nothing matched the target are
+    # three different problems with three different fixes.
+    if [ "$seen" -eq 0 ]; then
+      echo "📭 no agent records at this bus root (${root}). If you're in a git worktree, live sessions may be registered under the main checkout's bus instead — flag it if you see this."
+    elif [ "$stale" -eq "$seen" ]; then
+      echo "📭 found ${seen} agent record(s), all stale (>${STALE_HARD}s since last heartbeat) — nobody is currently live."
+    else
+      echo "📭 $(( seen - stale )) live instance(s) found, none matched \"${target}\" — live targets: ${live_desc}"
+    fi
+    exit 1
     ;;
 
   # ── one-shot snapshot (/bus) and live monitor (watch) ─────────────────────

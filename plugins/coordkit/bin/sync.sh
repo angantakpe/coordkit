@@ -27,21 +27,23 @@
 #   COORDKIT_SYNC_TIMEOUT   max seconds a single sync may run (default 30)
 set -uo pipefail
 
-# Resolve this script's real path (via readlink -f, with a fallback) so a symlinked
-# entrypoint still finds the plugin root relative to the actual file, not the link.
-__self="$0"
-if command -v readlink >/dev/null 2>&1; then
-  __r="$(readlink -f "$0" 2>/dev/null)" && [ -n "$__r" ] && __self="$__r"
-fi
-
-ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}}}}"
-LIB="${ROOT}/transports/lib.sh"
-COMMON="${ROOT}/scripts/common.sh"
-
-# resolve_root() comes from the shared library, so the repo this sync's
-# debounce/lock markers guard is exactly the repo the transport will replicate.
+# Bootstrap: locate common.sh from this script's real path (readlink -f, with a
+# fallback, so a symlinked entrypoint resolves from the actual file, not the
+# link). This is the irreducible minimum — the plugin-root env chain itself
+# lives in common.sh's ck_runtime_root() and must not be re-spelled here.
+#
+# common.sh also supplies resolve_root(), so the repo this sync's debounce/lock
+# markers guard is exactly the repo the transport will replicate. Without it we
+# cannot pick a repo at all — and this script must never fail loudly, so a
+# missing runtime is a silent no-op like a missing transport below.
+__self="$(readlink -f "$0" 2>/dev/null)"; [ -n "$__self" ] || __self="$0"
+__common="$(cd "$(dirname "$__self")/../scripts" 2>/dev/null && pwd)/common.sh"
+[ -f "$__common" ] || exit 0
 # shellcheck source=../scripts/common.sh
-[ -f "$COMMON" ] && . "$COMMON"
+. "$__common"
+
+ROOT="$(ck_runtime_root)"
+LIB="${ROOT}/transports/lib.sh"
 
 # No git transport installed → nothing to sync; succeed silently.
 [ -f "$LIB" ] || exit 0

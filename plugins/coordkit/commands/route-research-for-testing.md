@@ -7,6 +7,10 @@ model: sonnet
 
 ## Context
 
+This command assumes an HTTP service whose handlers live under a `routes/` directory and
+whose edited-file log is written to `$CLAUDE_PROJECT_DIR/.claude/tsc-cache`. Adjust the
+paths and grep pattern below to match the project's actual layout before running it.
+
 Changed route files this session (auto-generated):
 
 !cat "$CLAUDE_PROJECT_DIR/.claude/tsc-cache"/\*/edited-files.log \
@@ -21,7 +25,7 @@ User-specified additional routes: `$ARGUMENTS`
 Follow the numbered steps **exactly**:
 
 1. Combine the auto list with `$ARGUMENTS`, dedupe, and resolve any prefixes
-   defined in `src/app.ts`.
+   defined wherever the app registers its routers (e.g. `src/app.ts`).
 2. For each final route, output a JSON record with the path, method, expected
    request/response shapes, and valid + invalid payload examples.
 3. **Now call the `Task` tool** using:

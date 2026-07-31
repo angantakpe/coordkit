@@ -4,22 +4,17 @@ Ideas and concepts for future improvements to the skill system.
 
 ---
 
-## Dynamic Rule Updates
+## Rule Caching
 
-**Current State:** Requires Claude Code restart to pick up changes to skill-rules.json
+**Current State:** `skill-rules.json` is re-read and re-parsed on every prompt,
+so edits take effect immediately with no restart — at the cost of spawning `jq`
+and reading both rule layers each time.
 
-**Future Enhancement:** Hot-reload configuration without restart
-
-**Implementation Ideas:**
-- Watch skill-rules.json for changes
-- Reload on file modification
-- Invalidate cached compiled regexes
-- Notify user of reload
+**Future Enhancement:** cache the parsed rules and invalidate on mtime change
 
 **Benefits:**
-- Faster iteration during skill development
-- No need to restart Claude Code
-- Better developer experience
+- Lower per-prompt overhead as the rules file grows
+- Keeps the current zero-restart iteration loop
 
 ---
 
@@ -54,7 +49,8 @@ Ideas and concepts for future improvements to the skill system.
 
 ## Conditional Enforcement
 
-**Current State:** Enforcement level is static
+**Current State:** the `enforcement` field is reserved and unread — every match
+is rendered as a suggestion, whatever the entry says
 
 **Future Enhancement:** Enforce based on context or environment
 
@@ -157,7 +153,7 @@ Ideas and concepts for future improvements to the skill system.
 
 ## Skill Testing Framework
 
-**Current State:** Manual testing with npx tsx commands
+**Current State:** manual testing by piping a prompt into `skill-activation.sh`
 
 **Future Enhancement:** Automated skill testing
 
@@ -167,20 +163,11 @@ Ideas and concepts for future improvements to the skill system.
 - CI/CD integration
 - Coverage reports
 
-**Example Test:**
-```typescript
-describe('database-verification', () => {
-  it('triggers on Prisma imports', () => {
-    const result = testSkill({
-      prompt: "add user tracking",
-      file: "services/user.ts",
-      content: "import { PrismaService } from './prisma'"
-    });
-
-    expect(result.triggered).toBe(true);
-    expect(result.skill).toBe('database-verification');
-  });
-});
+**Example Test** (a table of prompt → expected-skill cases, asserted against the
+real hook — matching coordkit's existing bash test style):
+```bash
+assert_suggests "add a new skill" "coordkit:skill-developer"
+assert_silent   "what time is it"
 ```
 
 **Benefits:**

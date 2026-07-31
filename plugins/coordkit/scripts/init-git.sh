@@ -48,7 +48,9 @@ repo="$(git -C "$(ck_project_dir)" rev-parse --show-toplevel 2>/dev/null)" || {
 coord="${repo}/.claude/coord"
 mkdir -p "${coord}/log" || { echo "coordkit init-git: cannot create ${coord}" >&2; exit 1; }
 
-# 1) .gitattributes (merge=union backstop)
+# 1) .gitattributes (merge=union backstop) — inert on this branch, since step 4 gitignores
+#    .claude/coord/log/ so no *.ndjson is ever tracked here; written defensively in case a
+#    user un-ignores it. The load-bearing merge driver lives in the git.sh sync worktree.
 if [ -f "${TPL}/gitattributes" ]; then cp -f "${TPL}/gitattributes" "${coord}/.gitattributes"
 else printf '*.ndjson merge=union\n' > "${coord}/.gitattributes"; fi
 
@@ -103,7 +105,7 @@ _ignore '/.claude/coord/.coord.lock*'
 #    Append-only files: copy each per-actor segment when the destination is missing or
 #    the source is strictly larger; fold the legacy flat ledger under a synthetic actor
 #    (readall globs *.ndjson under log/, dedups by eid, and orders by clock).
-bus="${CLAUDE_BUS_DIR:-${repo}/.coordkit-bus}"
+bus="${COORDKIT_BUS_DIR:-${repo}/.coordkit-bus}"
 _copy_if_grown() { # src dst
   local src="$1" dst="$2" ssz dsz tmp
   [ -f "$src" ] || return 0

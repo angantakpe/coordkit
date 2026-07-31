@@ -1,11 +1,12 @@
 # skill-rules.json - Complete Reference
 
-Complete schema and configuration reference for `.claude/skills/skill-rules.json`.
+Complete schema and configuration reference for `skill-rules.json`, the file
+coordkit's skill-activation hook reads.
 
 ## Table of Contents
 
 - [File Location](#file-location)
-- [Complete TypeScript Schema](#complete-typescript-schema)
+- [Complete Schema](#complete-schema)
 - [Field Guide](#field-guide)
 - [Example: Guardrail Skill](#example-guardrail-skill)
 - [Example: Domain Skill](#example-domain-skill)
@@ -15,46 +16,48 @@ Complete schema and configuration reference for `.claude/skills/skill-rules.json
 
 ## File Location
 
-**Path:** `.claude/skills/skill-rules.json`
+Two layers, both optional, both using the identical schema:
 
-This JSON file defines all skills and their trigger conditions for the auto-activation system.
+| Layer   | Path                                                     |
+| ------- | -------------------------------------------------------- |
+| Global  | `~/.claude/skills/skill-rules.json`                       |
+| Project | `$CLAUDE_PROJECT_DIR/.claude/skills/skill-rules.json`     |
+
+Both are read and their `skills` objects merged; a project entry **replaces**
+the global entry with the same skill name (a whole-entry override, not a deep
+merge). A ready-to-copy starting point ships at
+`plugins/coordkit/templates/skill-rules.example.json`.
 
 ---
 
-## Complete TypeScript Schema
+## Complete Schema
 
-```typescript
-interface SkillRules {
-    version: string;
-    skills: Record<string, SkillRule>;
-}
-
-interface SkillRule {
-    type: 'guardrail' | 'domain';
-    enforcement: 'block' | 'suggest' | 'warn';
-    priority: 'critical' | 'high' | 'medium' | 'low';
-
-    promptTriggers?: {
-        keywords?: string[];
-        intentPatterns?: string[];  // Regex strings
-    };
-
-    fileTriggers?: {
-        pathPatterns: string[];     // Glob patterns
-        pathExclusions?: string[];  // Glob patterns
-        contentPatterns?: string[]; // Regex strings
-        createOnly?: boolean;       // Only trigger on file creation
-    };
-
-    blockMessage?: string;  // For guardrails, {file_path} placeholder
-
-    skipConditions?: {
-        sessionSkillUsed?: boolean;      // Skip if used in session
-        fileMarkers?: string[];          // e.g., ["@skip-validation"]
-        envOverride?: string;            // e.g., "SKIP_DB_VERIFICATION"
-    };
+```jsonc
+{
+  "version": "1.0",              // free-form; not interpreted by the hook
+  "skills": {
+    "<skill-name>": {            // must match what the Skill tool invokes;
+                                 // plugin-qualified for plugin skills,
+                                 // e.g. "coordkit:skill-developer"
+      "type": "domain",          // "domain" | "guardrail" — metadata only
+      "enforcement": "suggest",  // reserved; v1 is suggest-only
+      "priority": "medium",      // "critical" | "high" | "medium" | "low"
+      "description": "...",      // for humans reading this file
+      "promptTriggers": {
+        "keywords": ["..."],        // case-insensitive substring match
+        "intentPatterns": ["..."]   // case-insensitive regex
+      }
+    }
+  }
 }
 ```
+
+Only `skills[].priority` and `skills[].promptTriggers` affect hook behaviour.
+Everything else is documentation for whoever maintains the file.
+
+> There is no `fileTriggers`, `blockMessage`, or `skipConditions` support.
+> Activation is driven entirely by the text of the user's prompt, and it never
+> blocks a tool call. See [HOOK_MECHANISMS.md](HOOK_MECHANISMS.md).
 
 ---
 
@@ -64,119 +67,59 @@ interface SkillRule {
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `version` | string | Yes | Schema version (currently "1.0") |
-| `skills` | object | Yes | Map of skill name → SkillRule |
+| `version` | string | Optional | Schema version marker for humans; unread by the hook |
+| `skills` | object | Yes | Map of skill name → SkillRule. Absent/empty means nothing ever matches |
 
 ### SkillRule Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `type` | string | Yes | "guardrail" (enforced) or "domain" (advisory) |
-| `enforcement` | string | Yes | "block" (PreToolUse), "suggest" (UserPromptSubmit), or "warn" |
-| `priority` | string | Yes | "critical", "high", "medium", or "low" |
-| `promptTriggers` | object | Optional | Triggers for UserPromptSubmit hook |
-| `fileTriggers` | object | Optional | Triggers for PreToolUse hook |
-| `blockMessage` | string | Optional* | Required if enforcement="block". Use `{file_path}` placeholder |
-| `skipConditions` | object | Optional | Escape hatches and session tracking |
-
-*Required for guardrails
+| `type` | string | Optional | `"guardrail"` or `"domain"`. Descriptive only |
+| `enforcement` | string | Optional | Reserved for a future release; every match is a suggestion today |
+| `priority` | string | Optional | `"critical"`, `"high"`, `"medium"` (default), or `"low"`. Chooses the heading the suggestion appears under |
+| `description` | string | Optional | One-line note for maintainers |
+| `promptTriggers` | object | Optional | Match conditions. An entry without it can never match |
 
 ### promptTriggers Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `keywords` | string[] | Optional | Exact substring matches (case-insensitive) |
-| `intentPatterns` | string[] | Optional | Regex patterns for intent detection |
+| `keywords` | string[] | Optional | Substring matches, case-insensitive, no word boundaries |
+| `intentPatterns` | string[] | Optional | Regex patterns, case-insensitive. An invalid pattern silently never matches |
 
-### fileTriggers Fields
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `pathPatterns` | string[] | Yes* | Glob patterns for file paths |
-| `pathExclusions` | string[] | Optional | Glob patterns to exclude (e.g., test files) |
-| `contentPatterns` | string[] | Optional | Regex patterns to match file content |
-| `createOnly` | boolean | Optional | Only trigger when creating new files |
-
-*Required if fileTriggers is present
-
-### skipConditions Fields
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `sessionSkillUsed` | boolean | Optional | Skip if skill already used this session |
-| `fileMarkers` | string[] | Optional | Skip if file contains comment marker |
-| `envOverride` | string | Optional | Environment variable name to disable skill |
+A skill matches if **any** keyword **or any** intent pattern matches. Omitting
+one of the two lists is equivalent to supplying an empty one.
 
 ---
 
 ## Example: Guardrail Skill
 
-Complete example of a blocking guardrail skill with all features:
+A `guardrail` entry looks the same as any other; the difference is the
+`critical` priority, which surfaces it under the most prominent heading.
 
 ```json
 {
-  "database-verification": {
-    "type": "guardrail",
-    "enforcement": "block",
-    "priority": "critical",
-
-    "promptTriggers": {
-      "keywords": [
-        "prisma",
-        "database",
-        "table",
-        "column",
-        "schema",
-        "query",
-        "migration"
-      ],
-      "intentPatterns": [
-        "(add|create|implement).*?(user|login|auth|tracking|feature)",
-        "(modify|update|change).*?(table|column|schema|field)",
-        "database.*?(change|update|modify|migration)"
-      ]
-    },
-
-    "fileTriggers": {
-      "pathPatterns": [
-        "**/schema.prisma",
-        "**/migrations/**/*.sql",
-        "database/src/**/*.ts",
-        "form/src/**/*.ts",
-        "email/src/**/*.ts",
-        "users/src/**/*.ts",
-        "projects/src/**/*.ts",
-        "utilities/src/**/*.ts"
-      ],
-      "pathExclusions": [
-        "**/*.test.ts",
-        "**/*.spec.ts"
-      ],
-      "contentPatterns": [
-        "import.*[Pp]risma",
-        "PrismaService",
-        "prisma\\.",
-        "\\.findMany\\(",
-        "\\.findUnique\\(",
-        "\\.findFirst\\(",
-        "\\.create\\(",
-        "\\.createMany\\(",
-        "\\.update\\(",
-        "\\.updateMany\\(",
-        "\\.upsert\\(",
-        "\\.delete\\(",
-        "\\.deleteMany\\("
-      ]
-    },
-
-    "blockMessage": "⚠️ BLOCKED - Database Operation Detected\n\n📋 REQUIRED ACTION:\n1. Use Skill tool: 'database-verification'\n2. Verify ALL table and column names against schema\n3. Check database structure with DESCRIBE commands\n4. Then retry this edit\n\nReason: Prevent column name errors in Prisma queries\nFile: {file_path}\n\n💡 TIP: Add '// @skip-validation' comment to skip future checks",
-
-    "skipConditions": {
-      "sessionSkillUsed": true,
-      "fileMarkers": [
-        "@skip-validation"
-      ],
-      "envOverride": "SKIP_DB_VERIFICATION"
+  "skills": {
+    "database-verification": {
+      "type": "guardrail",
+      "enforcement": "suggest",
+      "priority": "critical",
+      "description": "Verify table/column names before writing queries",
+      "promptTriggers": {
+        "keywords": [
+          "prisma",
+          "database",
+          "table",
+          "column",
+          "schema",
+          "query",
+          "migration"
+        ],
+        "intentPatterns": [
+          "(modify|update|change).*?(table|column|schema|field)",
+          "database.*?(change|update|modify|migration)"
+        ]
+      }
     }
   }
 }
@@ -184,67 +127,37 @@ Complete example of a blocking guardrail skill with all features:
 
 ### Key Points for Guardrails
 
-1. **type**: Must be "guardrail"
-2. **enforcement**: Must be "block"
-3. **priority**: Usually "critical" or "high"
-4. **blockMessage**: Required, clear actionable steps
-5. **skipConditions**: Session tracking prevents repeated nagging
-6. **fileTriggers**: Usually has both path and content patterns
-7. **contentPatterns**: Catch actual usage of technology
+1. **priority**: use `"critical"` or `"high"` so it lands in the top buckets
+2. **keywords**: name the technology and the nouns people actually type
+3. It still only *suggests* — if the practice truly must be enforced, that
+   belongs in a `PreToolUse` hook of its own, not in `skill-rules.json`
 
 ---
 
 ## Example: Domain Skill
 
-Complete example of a suggestion-based domain skill:
-
 ```json
 {
-  "project-catalog-developer": {
-    "type": "domain",
-    "enforcement": "suggest",
-    "priority": "high",
-
-    "promptTriggers": {
-      "keywords": [
-        "layout",
-        "layout system",
-        "grid",
-        "grid layout",
-        "toolbar",
-        "column",
-        "cell editor",
-        "cell renderer",
-        "submission",
-        "submissions",
-        "blog dashboard",
-        "datagrid",
-        "data grid",
-        "CustomToolbar",
-        "GridLayoutDialog",
-        "useGridLayout",
-        "auto-save",
-        "column order",
-        "column width",
-        "filter",
-        "sort"
-      ],
-      "intentPatterns": [
-        "(how does|how do|explain|what is|describe).*?(layout|grid|toolbar|column|submission|catalog)",
-        "(add|create|modify|change).*?(toolbar|column|cell|editor|renderer)",
-        "blog dashboard.*?"
-      ]
-    },
-
-    "fileTriggers": {
-      "pathPatterns": [
-        "frontend/src/features/submissions/**/*.tsx",
-        "frontend/src/features/submissions/**/*.ts"
-      ],
-      "pathExclusions": [
-        "**/*.test.tsx",
-        "**/*.test.ts"
-      ]
+  "skills": {
+    "coordkit:skill-developer": {
+      "type": "domain",
+      "enforcement": "suggest",
+      "priority": "high",
+      "description": "Meta-skill for creating and managing Claude Code skills",
+      "promptTriggers": {
+        "keywords": [
+          "create skill",
+          "new skill",
+          "skill rules",
+          "skill-rules.json",
+          "skill triggers",
+          "skill activation"
+        ],
+        "intentPatterns": [
+          "(create|add|build|write).*?skill",
+          "skill.*?(trigger|activate|not activating)"
+        ]
+      }
     }
   }
 }
@@ -252,13 +165,9 @@ Complete example of a suggestion-based domain skill:
 
 ### Key Points for Domain Skills
 
-1. **type**: Must be "domain"
-2. **enforcement**: Usually "suggest"
-3. **priority**: "high" or "medium"
-4. **blockMessage**: Not needed (doesn't block)
-5. **skipConditions**: Optional (less critical)
-6. **promptTriggers**: Usually has extensive keywords
-7. **fileTriggers**: May have only path patterns (content less important)
+1. **priority**: `"high"` or `"medium"`
+2. **keywords**: prefer multi-word phrases — single common words fire constantly
+3. **intentPatterns**: catch the phrasings that never mention the topic by name
 
 ---
 
@@ -267,45 +176,52 @@ Complete example of a suggestion-based domain skill:
 ### Check JSON Syntax
 
 ```bash
-cat .claude/skills/skill-rules.json | jq .
+jq . ~/.claude/skills/skill-rules.json
 ```
 
-If valid, jq will pretty-print the JSON. If invalid, it will show the error.
+If valid, jq pretty-prints the file. If invalid, it prints the error. This
+matters more than usual here: the hook suppresses jq's stderr, so a malformed
+rules file makes activation silently stop working rather than fail loudly.
+
+### Check That It Actually Matches
+
+```bash
+echo '{"prompt":"how do I create a new skill?"}' \
+  | bash plugins/coordkit/scripts/skill-activation.sh
+```
 
 ### Common JSON Errors
 
 **Trailing comma:**
 ```json
 {
-  "keywords": ["one", "two",]  // ❌ Trailing comma
+  "keywords": ["one", "two",]
 }
 ```
 
-**Missing quotes:**
+**Missing quotes on a key:**
 ```json
 {
-  type: "guardrail"  // ❌ Missing quotes on key
+  type: "guardrail"
 }
 ```
 
 **Single quotes (invalid JSON):**
 ```json
 {
-  'type': 'guardrail'  // ❌ Must use double quotes
+  'type': 'guardrail'
 }
 ```
 
 ### Validation Checklist
 
 - [ ] JSON syntax valid (use `jq`)
-- [ ] All skill names match SKILL.md filenames
-- [ ] Guardrails have `blockMessage`
-- [ ] Block messages use `{file_path}` placeholder
-- [ ] Intent patterns are valid regex (test on regex101.com)
-- [ ] File path patterns use correct glob syntax
-- [ ] Content patterns escape special characters
-- [ ] Priority matches enforcement level
-- [ ] No duplicate skill names
+- [ ] Every entry sits under the top-level `skills` object
+- [ ] Skill names match exactly what the Skill tool expects (plugin-qualified for plugin skills)
+- [ ] Intent patterns are valid regex
+- [ ] Keywords are specific enough not to match unrelated prompts
+- [ ] Priority matches how urgently the skill should be surfaced
+- [ ] No duplicate skill names within a file
 
 ---
 

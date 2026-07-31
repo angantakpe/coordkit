@@ -26,7 +26,7 @@
     },
     "clock": {
       "type": "object",
-      "description": "Per-actor clock: wall-ms + counter. The INTENDED total order across replicas is sort by (clock.p, clock.c, actor) — machine-independent, NOT wall-clock last-writer-wins. STATUS: the ordering rule is not yet the read path; the shipped ledger still reads in local `seq` order (see the `seq` field).",
+      "description": "Per-actor clock: wall-ms + counter. AS IMPLEMENTED the cross-instance total order is sort by (clock.p, clock.c, actor), and it IS the transport layer's read path: transports/lib.sh __total_order backs every logstore_readall/logstore_since/logstore_watermark call in every mode, and never consults `seq`. LIMITATION: because `clock.p` is unsynchronised per-machine wall-clock ms and `clock.c` is not reconciled against peers, ordering ACROSS actors is effectively wall-clock last-writer-wins and is subject to inter-machine clock skew (`clock.c`/`actor` only break exact-millisecond ties). Within one actor the order is correct and stable. NOTE two DIFFERENT read paths exist: the transport union described here, and ledger.sh's own local projections/cursors, which still key off `seq` (see the `seq` field) — lib.sh is authoritative for cross-instance order.",
       "required": ["p", "c"],
       "properties": {
         "p": { "type": "integer", "description": "wall-clock milliseconds" },
