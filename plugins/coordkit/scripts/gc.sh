@@ -7,7 +7,14 @@
 # trims the log to an arbitrary size, and can remove the bus outright when a
 # project is abandoned.
 #
-# DRY RUN IS THE DEFAULT — nothing is deleted unless --apply is passed.
+# It also migrates the pre-4.0.0 bus directory name: coordkit used to write
+# state to <repo>/.claude-bus/ and moved to <repo>/.coordkit-bus/ at 4.0.0 (the
+# host/adapter reframe — .claude-bus was Claude-specific, .coordkit-bus isn't).
+# The code-level rename doesn't touch state already on disk, so a repo that ran
+# pre-4.0.0 coordkit is left with a stale .claude-bus/ next to the new
+# .coordkit-bus/. See migrate_legacy_dir() below for exactly what happens.
+#
+# DRY RUN IS THE DEFAULT — nothing is deleted or moved unless --apply is passed.
 #
 # Usage: cobus gc [--apply] [--keep N] [--nuke --yes-i-am-sure] [repo]
 set -uo pipefail
@@ -40,7 +47,10 @@ Usage: cobus gc [--apply] [--keep N] [--nuke --yes-i-am-sure] [repo]
                      toplevel, else the current directory)
 
 Reaped: agent heartbeats older than 6h, claims with no live owner, cursors with
-no live agent, empty inbox dirs, and an oversized activity.log.
+no live agent, empty inbox dirs, and an oversized activity.log. Also migrates
+a legacy .claude-bus/ (coordkit's pre-4.0.0 state dir name) if one is found —
+renamed into .coordkit-bus/ if that's empty/absent, otherwise just reported
+for you to reconcile or remove by hand.
 EOF
       exit 0 ;;
     -*) echo "gc: unknown option: $1" >&2; exit 2 ;;
@@ -58,8 +68,43 @@ case "$KEEP" in ''|*[!0-9]*) echo "gc: --keep must be a number" >&2; exit 2 ;; e
 
 root="$(resolve_root "${REPO:-$PWD}")"
 bus="${root}/.coordkit-bus"
+legacy="${root}/.claude-bus"
 agents="${bus}/agents"; claims="${bus}/claims"; cursors="${bus}/cursors"
 inbox="${bus}/inbox"; log="${bus}/activity.log"
+
+mode="DRY RUN (pass --apply to delete)"; [ "$APPLY" = 1 ] && mode="APPLY"
+
+# ── legacy .claude-bus/ -> .coordkit-bus/ migration (pre-4.0.0 dir name) ────
+# Two cases:
+#   1. .coordkit-bus/ doesn't exist yet: this session never ran post-4.0.0
+#      coordkit here, so .claude-bus/ is the ONLY copy of the state — a plain
+#      rename is safe and loses nothing (ledger.jsonl, claims, cursors, all of
+#      it move as-is).
+#   2. .coordkit-bus/ already exists: both dirs have independently-seeded
+#      state (this happens if 4.0.0 coordkit ran here at least once before gc
+#      did). Merging two ledger.jsonl logs risks colliding seq numbers, so gc
+#      does NOT attempt that — it just reports the legacy dir's contents so
+#      you can look at .claude-bus/ledger.jsonl yourself before deciding to
+#      remove it (nothing in it survives a `--nuke`-equivalent decision here
+#      automatically; that stays a manual call).
+if [ -d "$legacy" ]; then
+  if [ ! -e "$bus" ]; then
+    echo "gc: found legacy bus dir ${legacy}, no ${bus} yet — ${mode}"
+    if [ "$APPLY" = 1 ]; then
+      mv "$legacy" "$bus" && echo "gc: migrated ${legacy} -> ${bus}" \
+        || echo "gc: failed to migrate ${legacy} -> ${bus}" >&2
+    else
+      echo "gc: would rename ${legacy} -> ${bus}. Add --apply to do it."
+    fi
+  else
+    lines="$(wc -l < "${legacy}/ledger.jsonl" 2>/dev/null || echo 0)"
+    case "${lines:-}" in ''|*[!0-9]*) lines=0 ;; esac
+    echo "gc: legacy bus dir ${legacy} AND current ${bus} both exist."
+    echo "gc: legacy ledger.jsonl has ${lines} line(s) — not auto-merged (seq"
+    echo "gc: numbers could collide). Review ${legacy}/ledger.jsonl by hand,"
+    echo "gc: then 'rm -rf ${legacy}' yourself once you're sure. gc leaves it."
+  fi
+fi
 
 if [ ! -d "$bus" ]; then
   echo "gc: no bus at ${bus} — nothing to collect."
@@ -67,7 +112,6 @@ if [ ! -d "$bus" ]; then
 fi
 
 now="$(date +%s)"
-mode="DRY RUN (pass --apply to delete)"; [ "$APPLY" = 1 ] && mode="APPLY"
 echo "gc: ${bus}"
 echo "gc: mode: ${mode}"
 

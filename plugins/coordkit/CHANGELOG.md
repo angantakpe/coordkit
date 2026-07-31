@@ -17,6 +17,19 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## 4.1.0
+
+### Added
+- **`cobus gc` migrates the pre-4.0.0 bus directory name.** coordkit used to
+  write state to `<repo>/.claude-bus/`; the 4.0.0 host/adapter reframe renamed
+  it to `<repo>/.coordkit-bus/` in code, but that rename doesn't touch state
+  already on disk — a repo that ran pre-4.0.0 coordkit is left with a stale
+  `.claude-bus/` next to (or instead of) the new `.coordkit-bus/`. `gc` now
+  detects it: a plain rename (no data lost) if `.coordkit-bus/` doesn't exist
+  yet, folded into the same `--apply` pass as everything else; otherwise just
+  a report, since merging two independent `ledger.jsonl` histories risks
+  colliding `seq` numbers and isn't attempted automatically.
+
 ## 4.0.0
 
 Merges skillkit into coordkit and adds cross-instance subagent visibility.
