@@ -49,6 +49,7 @@
 # their settings.json by hand, e.g.:
 #   "statusLine": {"type":"command","command":"bash <path>/bus.sh badge"}
 # It prints "🛰️ N live" and doubles as a throttled heartbeat tick.
+# See docs/STATUSLINE.md for the full rationale and the supported install path.
 #
 # By hand:
 #   bus.sh dashboard [repo]   one-shot snapshot (used by /bus)

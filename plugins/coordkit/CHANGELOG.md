@@ -17,6 +17,44 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## 4.2.0
+
+### Added
+- **`/coordkit:statusline-setup` — coordkit now owns the statusline seam.** The
+  `badge` phase is the one part of coordkit a plugin manifest cannot wire: a
+  manifest can't register `settings.json`'s top-level `statusLine` key, so the
+  badge has always required a hand-written wrapper living outside the plugin.
+  Those wrappers rot silently — a real one hardcoded an absolute path to
+  `claude-bus.sh` under `coordkit-marketplace/`, both names were later renamed
+  (the marketplace dir at HARDEN-3, then `claude-bus.sh` → `bus.sh`), and the
+  badge went empty with no error anywhere while the rest of the statusline kept
+  working. New `scripts/statusline-setup.sh` makes that wiring a first-class,
+  idempotent install step:
+  - `install` writes `~/.claude/hooks/coordkit-statusline.sh` and points
+    `statusLine` at it. The generated wrapper discovers `bus.sh` **by glob at
+    run time** (`~/.claude/plugins/marketplaces/*/plugins/coordkit/scripts/bus.sh`),
+    never by a path baked in at install time, so a future rename self-heals
+    without re-running anything — and if `bus.sh` is genuinely absent the
+    wrapper prints a visible `⚠️ coordkit bus.sh not found` badge instead of
+    going quiet.
+  - An existing `statusLine` command is **chained, never clobbered**: it runs
+    first and the badge is appended after a dim `│` separator, the pattern
+    already proven in the hand-written wrapper this replaces. `settings.json`
+    is read/written with `jq` and backed up to `settings.json.bak-<timestamp>`
+    before any modification; invalid JSON is refused rather than rewritten.
+  - Re-running is a no-op when everything is already correct, so it stays safe
+    after a coordkit update, a machine move, or a fresh `~/.claude`.
+  - `check` (alias `doctor`) is read-only: reports whether `statusLine` is
+    wired, whether it resolves to the coordkit wrapper, whether the wrapper's
+    glob still finds `bus.sh`, and prints a badge preview. Exits non-zero on a
+    genuine problem so it can gate a script, but never crashes.
+- **Passive statusline drift check on `SessionStart`.** `coord.sh`'s
+  `session-start` now also runs `statusline_drift_note` — two stats and a glob,
+  read-only, no writes. Silent unless the wrapper is installed *and* its glob no
+  longer resolves, in which case it adds one line to the session's
+  additionalContext suggesting `/coordkit:statusline-setup install`. That is
+  exactly the state that used to be invisible.
+
 ## 4.1.0
 
 ### Added

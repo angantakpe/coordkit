@@ -11,7 +11,7 @@
       "name": "coordkit",
       "source": "./plugins/coordkit",
       "description": "Same-machine coordination bus + cross-instance ledger + skill auto-activation, plus an opt-in hard anti-clobber guard (merged in from coordguard at 3.0.0). WARN-only by default: tracks who else is live in a repo, which files they touch, and which subagents they're running, and surfaces it — never blocks a tool call. Run /guard on to enable guard mode, which additionally denies a Write/Edit when the target file changed on disk since this session last read it. Also matches prompts against layered skill-rules.json files to suggest skills, and ships a shared roster of specialized agents and /dev-docs commands (merged in from skillkit at 4.0.0).",
-      "version": "4.1.0",
+      "version": "4.2.0",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"

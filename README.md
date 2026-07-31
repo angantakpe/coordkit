@@ -33,6 +33,8 @@ under the hood:
 - **[docs/LEDGER.md](docs/LEDGER.md)** — the shared-context layer: the
   event-sourcing model, the task queue (leases, auto-claim, work-stealing),
   pagination/digests, and the git-mode trust gate.
+- **[docs/STATUSLINE.md](docs/STATUSLINE.md)** — the statusline badge: what it
+  shows, why a plugin manifest can never wire it, and how to keep it wired.
 - **[docs/HOSTS.md](docs/HOSTS.md)** — the host/adapter split: what belongs to
   the shared coordination core, what stays adapter-specific, and what is still
   Claude-only today.

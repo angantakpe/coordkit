@@ -10,6 +10,7 @@
 # Subcommands (argv[1]) and the phases each one runs, in order:
 #
 #   session-start    SessionStart                          bus start  → ledger start
+#                                                          → statusline drift note
 #   prompt-submit    UserPromptSubmit                      bus task   → ledger prompt
 #   pretool-write    PreToolUse  Write|Edit|NotebookEdit   guard check → bus check
 #   pretool-bash     PreToolUse  Bash                      guard snapshot
@@ -53,6 +54,8 @@ CK_ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GE
 . "${CK_ROOT}/scripts/ledger.sh" 2>/dev/null || exit 0
 # shellcheck source=./guard.sh
 . "${CK_ROOT}/scripts/guard.sh"  2>/dev/null || exit 0
+# shellcheck source=./statusline-setup.sh
+. "${CK_ROOT}/scripts/statusline-setup.sh" 2>/dev/null || exit 0
 
 # Merge the additionalContext of any number of hook-output JSON blobs into the
 # single object this hook is allowed to emit. Blobs that are empty, unparseable,
@@ -79,9 +82,13 @@ input="$(cat)"
 
 case "$event" in
   session-start)
+    # statusline_drift_note is read-only and usually silent: it speaks up only
+    # when the installed statusline wrapper can no longer find bus.sh, i.e. the
+    # badge is already showing its not-found warning.
     ck_emit_context SessionStart \
       "$(bus_run    start <<<"$input")" \
-      "$(ledger_run start <<<"$input")"
+      "$(ledger_run start <<<"$input")" \
+      "$(statusline_drift_note)"
     ;;
 
   prompt-submit)
