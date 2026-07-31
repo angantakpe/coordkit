@@ -1,4 +1,7 @@
 # coord.toml — coordkit's committed, SECRET-FREE coordination pointer.
+# Adapter note: this file is host-neutral coordination state. The current
+# Claude Code adapter reads it from `.claude/coord/coord.toml`; another host
+# would use the same schema at its own adapter-specific path.
 #
 # This file is COMMITTED to the repo. A fresh clone reads it to self-describe and
 # auto-join the right coordination mode/room with no extra setup. It is a POINTER,

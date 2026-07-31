@@ -1,0 +1,9 @@
+{
+  "host": "gemini",
+  "status": "scaffolded",
+  "runtime": "shared-shell",
+  "manifestPath": null,
+  "hooksPath": null,
+  "commandsPath": null,
+  "notes": "Gemini-specific packaging and lifecycle wiring still need to be supplied by the host integration."
+}

@@ -22,7 +22,7 @@ as `'\''`. This keeps double quotes, `$(...)`, backticks, and `;` in the text
 literal so the shell never interprets them; do NOT interpolate the text
 unquoted. Subcommands that take no free text (`next`, `board`) need no quoting.
 
-Subcommands (the shared ledger lives in `<repo>/.claude-bus/ledger.jsonl`, read by every instance):
+Subcommands (the shared ledger lives in `<repo>/.coordkit-bus/ledger.jsonl`, read by every instance):
 - `note "<text>"` — drop a durable note all instances will see
 - `decide <subject> "<text>"` — record a decision (latest per subject wins)
 - `ask <subject> "<q>"` / `answer <subject> "<a>"` — open/close a question thread

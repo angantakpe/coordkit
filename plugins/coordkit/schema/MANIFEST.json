@@ -4,5 +4,5 @@
   "min_reader": "2.0",
   "compaction_epoch": 0,
   "notes": "Committed alongside a shared log. A reader whose supported protocol < this protocol degrades to READ-ONLY and surfaces an upgrade notice rather than corrupting. min_reader is the lowest envelope version a current reader must understand.",
-  "compaction": "`ledger.sh compact` bumps compaction_epoch and writes the recomputed projection state (task queue with status, latest decision per subject, open questions, max_seq) to <repo>/.claude-bus/compacted-<epoch>.json. It is a SNAPSHOT, not a truncation: the append-only log is never rewritten and no event is ever removed, so any reader can still recompute the same projections from the log alone. compaction_epoch exists only to let readers tell snapshots apart."
+  "compaction": "`ledger.sh compact` bumps compaction_epoch and writes the recomputed projection state (task queue with status, latest decision per subject, open questions, max_seq) to <repo>/.coordkit-bus/compacted-<epoch>.json. It is a SNAPSHOT, not a truncation: the append-only log is never rewritten and no event is ever removed, so any reader can still recompute the same projections from the log alone. compaction_epoch exists only to let readers tell snapshots apart."
 }

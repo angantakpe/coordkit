@@ -7,7 +7,7 @@
 # actor's segments PLUS — for backward-compat — the legacy flat ledger.jsonl, all
 # deduped (by eid) and totally ordered (by clock.p, clock.c, actor).
 #
-# Layout under <bus>/ (bus = COORDKIT_BUS_DIR, else <repo>/.claude-bus):
+# Layout under <bus>/ (bus = COORDKIT_BUS_DIR, else <repo>/.coordkit-bus):
 #   log/<actor>/seg.ndjson     per-actor append-only segment (created on demand)
 #   ledger.jsonl               legacy flat ledger (read-only, folded in if present)
 #   .ledger.lock               the flock file lib holds for appends (today's file)
@@ -19,7 +19,7 @@
 # / __local_lockfile. Sourcing defines functions only.
 
 __local_basedir() {
-  printf '%s' "${COORDKIT_BUS_DIR:-$(__logstore_repo_root)/.claude-bus}"
+  printf '%s' "${COORDKIT_BUS_DIR:-$(__logstore_repo_root)/.coordkit-bus}"
 }
 
 __local_lockfile() {

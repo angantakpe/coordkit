@@ -3,7 +3,7 @@ description: Show the shared cross-instance context layer — task queue, curren
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ledger.sh digest:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ledger.sh board:*)
 ---
 
-Show me the shared-context ledger for this repo (what every live Claude instance knows).
+Show me the shared-context ledger for this repo (what every live instance in this repo knows).
 
 !`${CLAUDE_PLUGIN_ROOT}/scripts/ledger.sh digest`
 

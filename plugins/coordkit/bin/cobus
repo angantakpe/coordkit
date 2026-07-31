@@ -7,7 +7,7 @@
 #
 # Usage: cobus <verb> [args...]
 #
-# Resolves the plugin root from $CLAUDE_PLUGIN_ROOT, falling back to its own
+# Resolves the plugin root from $COORDKIT_PLUGIN_ROOT / host aliases, falling back to its own
 # location so it works whether or not the plugin runtime injects the env var or
 # puts bin/ on PATH.
 set -uo pipefail
@@ -19,7 +19,7 @@ if command -v readlink >/dev/null 2>&1; then
   __r="$(readlink -f "$0" 2>/dev/null)" && [ -n "$__r" ] && __self="$__r"
 fi
 
-ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}"
+ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}}}}"
 LEDGER="${ROOT}/scripts/ledger.sh"
 
 usage() {
@@ -45,7 +45,7 @@ Setup / transport:
   init-git [room] [remote]    enable git-mode sharing for this repo
   sync                        replicate the git-mode log (run on a timer, not a hook)
   migrate                     append the v2 schema-upgrade marker (append-only)
-  gc [--apply] [repo]         garbage-collect this repo's .claude-bus/ (dead
+  gc [--apply] [repo]         garbage-collect this repo's .coordkit-bus/ (dead
                               agents/claims/cursors, oversized activity.log).
                               Dry-run by default; --apply to delete. Add
                               --nuke --yes-i-am-sure to remove the bus entirely.

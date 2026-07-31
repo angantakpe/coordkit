@@ -6,7 +6,7 @@
 # (potentially slow, network-bound) git replication of the coordination log never
 # sits in the critical path of a tool call. (Replication touches ONLY the coord log
 # via a private worktree — never the user's checkout, and never the local-only
-# .claude-bus activity firehose, per the transports README privacy rule.)
+# .coordkit-bus activity firehose, per the transports README privacy rule.)
 #
 # Behaviour:
 #   - If the git transport lib isn't installed, exit 0 quietly (nothing to sync).
@@ -16,13 +16,13 @@
 #   - Bounded: __git_sync runs under `timeout` (when available) so a hung git can
 #     never wedge the timer.
 #   - Observable: diagnostics (a timestamped status line + captured stderr) are
-#     appended to <repo>/.claude-bus/sync.log (rotated above ~200KB). Nothing is
+#     appended to <repo>/.coordkit-bus/sync.log (rotated above ~200KB). Nothing is
 #     ever printed to stdout (this may run in a hook-adjacent context) and the
 #     script ALWAYS exits 0.
 #
 # Env knobs:
-#   CLAUDE_PLUGIN_ROOT      plugin root (auto-resolved from $0 if unset)
-#   CLAUDE_BUS_ROOT         pin the repo whose coordination log to sync
+#   COORDKIT_PLUGIN_ROOT    plugin root (auto-resolved from $0 if unset)
+#   COORDKIT_BUS_ROOT       pin the repo whose coordination log to sync
 #   COORDKIT_SYNC_DEBOUNCE  min seconds between real syncs   (default 10)
 #   COORDKIT_SYNC_TIMEOUT   max seconds a single sync may run (default 30)
 set -uo pipefail
@@ -34,7 +34,7 @@ if command -v readlink >/dev/null 2>&1; then
   __r="$(readlink -f "$0" 2>/dev/null)" && [ -n "$__r" ] && __self="$__r"
 fi
 
-ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}"
+ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "$__self")/.." && pwd)}}}}"
 LIB="${ROOT}/transports/lib.sh"
 COMMON="${ROOT}/scripts/common.sh"
 
@@ -50,7 +50,7 @@ DEBOUNCE="${COORDKIT_SYNC_DEBOUNCE:-10}"
 SYNC_TIMEOUT="${COORDKIT_SYNC_TIMEOUT:-30}"
 
 repo="$(resolve_root "$PWD")"
-state="${repo}/.claude-bus"
+state="${repo}/.coordkit-bus"
 if ! mkdir -p "$state" 2>/dev/null; then
   # Fallback must stay scoped per-user AND per-repo — a bare ${TMPDIR:-/tmp} would make
   # the lock/stamp GLOBAL across every repo and user on the box, so a sync for one repo

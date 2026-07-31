@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gc.sh — garbage-collect a repo's .claude-bus/ coordination state.
+# gc.sh — garbage-collect a repo's .coordkit-bus/ coordination state.
 #
 # bus.sh already prunes hard-stale agents and their orphaned claims at
 # SessionStart, and auto-trims activity.log at 600 lines. This is the manual,
@@ -26,16 +26,17 @@ while [ $# -gt 0 ]; do
     --keep)          shift; KEEP="${1:-350}" ;;
     -h|--help)
       cat <<'EOF'
-cobus gc — garbage-collect this repo's .claude-bus/ state
+cobus gc — garbage-collect this repo's .coordkit-bus/ state
 
 Usage: cobus gc [--apply] [--keep N] [--nuke --yes-i-am-sure] [repo]
 
   (default)          DRY RUN — report what would be removed, delete nothing
   --apply            actually delete
   --keep N           lines of activity.log to retain when trimming (default 350)
-  --nuke             remove the ENTIRE .claude-bus/ directory; destructive, and
+  --nuke             remove the ENTIRE .coordkit-bus/ directory; destructive, and
                      refused unless --yes-i-am-sure is also passed
-  repo               repo root (default: $CLAUDE_BUS_ROOT, else the git
+  repo               repo root (default: $COORDKIT_BUS_ROOT, then host aliases,
+                     else the git
                      toplevel, else the current directory)
 
 Reaped: agent heartbeats older than 6h, claims with no live owner, cursors with
@@ -53,10 +54,10 @@ case "$KEEP" in ''|*[!0-9]*) echo "gc: --keep must be a number" >&2; exit 2 ;; e
 # Root resolution comes from the shared library, so gc collects exactly the bus
 # bus.sh writes.
 # shellcheck source=./common.sh
-. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh"
+. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}/scripts/common.sh"
 
 root="$(resolve_root "${REPO:-$PWD}")"
-bus="${root}/.claude-bus"
+bus="${root}/.coordkit-bus"
 agents="${bus}/agents"; claims="${bus}/claims"; cursors="${bus}/cursors"
 inbox="${bus}/inbox"; log="${bus}/activity.log"
 

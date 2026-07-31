@@ -2,8 +2,8 @@
 
 All notable changes to **coordkit** are documented here. This project follows
 [Semantic Versioning](https://semver.org/). The plugin `version` field in
-`.claude-plugin/plugin.json` is the canonical tooling-version axis — bump it to
-ship an update to installed users.
+`.claude-plugin/plugin.json` is the canonical tooling-version axis for the
+current Claude Code adapter — bump it to ship an update to installed users.
 
 coordguard used to be a separate plugin on its own version axis; as of 3.0.0 its
 enforcement logic is merged in here. It shipped one further release, 2.0.0, as
@@ -13,6 +13,11 @@ Its historical entries are no longer on disk but remain in git history
 (`git log -- plugins/coordguard/`).
 
 ## Unreleased
+
+### Changed
+- Reframed the packaging docs around a host/adapter split: coordkit is now
+  documented as a host-neutral coordination core, with the Claude Code
+  packaging called out as the current adapter.
 
 ### Removed
 - **The `coordguard` plugin, entirely.** The 2.0.0 tombstone described under
@@ -96,7 +101,7 @@ behaves exactly like 2.3.0 — warn-only, never denies a tool call.
   `bin/sync.sh`, `scripts/init-git.sh`, `scripts/migrate.sh`, `scripts/gc.sh`,
   and `scripts/bootstrap.sh` — 7+ independent copies that could (and once did,
   see 2.1.1's trust-gate work) silently drift from each other, splitting the
-  coordination state across two different `.claude-bus` trees. Every entrypoint
+  coordination state across two different `.coordkit-bus` trees. Every entrypoint
   now sources one canonical implementation. Pure refactor — no behavior change.
 
 ## 2.2.0
@@ -106,7 +111,7 @@ actually implemented.
 
 ### Added
 - **`cobus gc`** (`scripts/gc.sh`) — manual garbage collection for a repo's
-  `.claude-bus/`. Reaps hard-stale agent heartbeats, claims with no live owner,
+  `.coordkit-bus/`. Reaps hard-stale agent heartbeats, claims with no live owner,
   cursors whose session is gone, and empty inbox dirs; trims an oversized
   `activity.log` to `--keep N` lines. **Dry-run is the default** — nothing is
   deleted without `--apply`. `--nuke` removes the whole bus and is refused
@@ -177,7 +182,7 @@ review/fix passes over the bus, ledger, transports, packaging, and coordguard).
 - Actor sanitization rejects `.`/`..` (no more writes escaping `log/`).
 - Appends: `flock -w 5` bounded wait, mkdir-lock fallback when `flock(1)` is
   absent (macOS), real failures now propagate to callers.
-- `bin/sync.sh`: failures/timeouts logged to `.claude-bus/sync.log` (rotated)
+- `bin/sync.sh`: failures/timeouts logged to `.coordkit-bus/sync.log` (rotated)
   instead of being discarded; repo resolution matches lib.sh (incl.
   `CLAUDE_PROJECT_DIR`); tmp fallback scoped per-user/per-repo.
 - Detached HEAD no longer matches as "same branch" (false collision warnings);
@@ -239,7 +244,7 @@ through a git marketplace.
 ### Changed
 - **v2 event envelope.** Events written to the per-repo bus/ledger use the v2
   envelope (see the bundled `schema/` and `transports/` layers). Migration of
-  pre-existing `.claude-bus/` state is handled by the bundled bootstrap/migrate
+  pre-existing `.coordkit-bus/` state is handled by the bundled bootstrap/migrate
   scripts on first run.
 - Hook commands use exec form (`command` + `args`) so plugin paths containing
   spaces are passed as a single argument with no shell quoting.

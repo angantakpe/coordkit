@@ -7,61 +7,100 @@
 # These four were previously hand-copied into bus.sh, ledger.sh,
 # migrate.sh, gc.sh, bin/sync.sh, bootstrap.sh and transports/lib.sh. The copies
 # drifted (one branch_of returned "" on a detached HEAD where another returned
-# "detached"; one resolve_root ranked CLAUDE_PROJECT_DIR above the git toplevel),
+# "detached"; one resolve_root ranked the workspace dir above the git toplevel),
 # and a resolve_root drift is silently corrupting: two components resolve two
-# DIFFERENT .claude-bus trees and the coordination state splits in half. Every
+# DIFFERENT .coordkit-bus trees and the coordination state splits in half. Every
 # caller now sources this file so that class of bug is structurally impossible.
 #
 # SOURCING IS SIDE-EFFECT-FREE: this file only defines functions. No I/O, no
 # mkdir, no config reads. Everything is deferred to call time.
 #
 # Sourced as:
-#   scripts/*    . "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}/scripts/common.sh"
-#   transports/  via __logstore_common (CLAUDE_PLUGIN_ROOT, else ../scripts/)
+#   scripts/*    . "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}}/scripts/common.sh"
+#   transports/  via __logstore_common (COORDKIT_PLUGIN_ROOT, else legacy fallback)
 #   bin/*        relative to the readlink-resolved ROOT
 
 [ -n "${_CK_COMMON_SH:-}" ] && return 0
 _CK_COMMON_SH=1
 
+ck_first_env() {
+  local name value
+  for name in "$@"; do
+    value="${!name:-}"
+    [ -n "$value" ] && { printf '%s' "$value"; return 0; }
+  done
+  return 1
+}
+
 # --------------------------------------------------------------------------- #
-# Plugin install root — the directory holding scripts/, transports/, schema/.
-# Prefer the plugin runtime's env var; fall back to this file's own location
-# (common.sh lives in scripts/, so its parent is the plugin root).
+# Runtime install root — the directory holding scripts/, transports/, schema/.
+# Prefer the host adapter's env var; fall back to this file's own location
+# (common.sh lives in scripts/, so its parent is the runtime root).
 # --------------------------------------------------------------------------- #
-ck_plugin_root() {
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then printf '%s' "$CLAUDE_PLUGIN_ROOT"; return 0; fi
+ck_runtime_root() {
+  if ck_first_env COORDKIT_PLUGIN_ROOT CLAUDE_PLUGIN_ROOT CODEX_PLUGIN_ROOT GEMINI_PLUGIN_ROOT; then return 0; fi
   ( cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd )
+}
+
+ck_plugin_root() {
+  ck_runtime_root
 }
 
 # Persistent, cross-repo plugin data dir (site.json, clock.state, trust.json).
 ck_data_dir() {
-  printf '%s' "${COORDKIT_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/coordkit-data}}"
+  if ck_first_env COORDKIT_DATA COORDKIT_PLUGIN_DATA CLAUDE_PLUGIN_DATA CODEX_PLUGIN_DATA GEMINI_PLUGIN_DATA; then return 0; fi
+  printf '%s' "$HOME/.claude/coordkit-data"
+}
+
+# Repo-scoped helpers that accept both the neutral COORDKIT_* adapter names and
+# the legacy CLAUDE_* names used by the current plugin runtime.
+ck_project_dir() {
+  if ck_first_env COORDKIT_PROJECT_DIR CLAUDE_PROJECT_DIR CODEX_PROJECT_DIR GEMINI_PROJECT_DIR; then return 0; fi
+  printf '%s' "${PWD:-.}"
+}
+
+ck_session_id() {
+  if ck_first_env COORDKIT_SESSION_ID CLAUDE_SESSION_ID CODEX_SESSION_ID GEMINI_SESSION_ID; then return 0; fi
+  printf 'cli'
+}
+
+ck_coord_dir() {
+  local root="${1:-$(resolve_root "$PWD")}"
+  if ck_first_env COORDKIT_COORD_DIR CLAUDE_COORD_DIR CODEX_COORD_DIR GEMINI_COORD_DIR; then return 0; fi
+  printf '%s/.claude/coord' "$root"
+}
+
+ck_coord_toml() {
+  local root="${1:-$(resolve_root "$PWD")}"
+  if ck_first_env COORDKIT_COORD_TOML CLAUDE_COORD_TOML CODEX_COORD_TOML GEMINI_COORD_TOML; then return 0; fi
+  printf '%s/coord.toml' "$(ck_coord_dir "$root")"
 }
 
 # --------------------------------------------------------------------------- #
 # resolve_root <cwd> — THE repo-root rule. Precedence:
-#   CLAUDE_BUS_ROOT > git toplevel > nearest ancestor with .claude-bus/ >
-#   CLAUDE_PROJECT_DIR > cwd
+#   COORDKIT_BUS_ROOT / CLAUDE_BUS_ROOT / CODEX_BUS_ROOT / GEMINI_BUS_ROOT >
+#   git toplevel > nearest ancestor with .coordkit-bus/ >
+#   COORDKIT_PROJECT_DIR / CLAUDE_PROJECT_DIR / CODEX_PROJECT_DIR /
+#   GEMINI_PROJECT_DIR > cwd
 #
-# The git-toplevel-before-CLAUDE_PROJECT_DIR order matters in a workspace of
-# nested git repos under a non-git parent project dir: preferring
-# CLAUDE_PROJECT_DIR there would resolve some components to the PARENT while
-# others resolved to the nested repo. The ancestor-.claude-bus probe is what lets
-# a non-git subdir join a parent bus, so it must stay ahead of the
-# CLAUDE_PROJECT_DIR fallback.
+# The git-toplevel-before-project-dir order matters in a workspace of nested git
+# repos under a non-git parent project dir: preferring the workspace dir there
+# would resolve some components to the PARENT while others resolved to the nested
+# repo. The ancestor-.coordkit-bus probe is what lets a non-git subdir join a
+# parent bus, so it must stay ahead of the project-dir fallback.
 # --------------------------------------------------------------------------- #
 resolve_root() {
   local cwd="$1" top dir
   # explicit pin wins over everything — lets sibling non-git subdirs share one bus
-  if [ -n "${CLAUDE_BUS_ROOT:-}" ]; then printf '%s' "$CLAUDE_BUS_ROOT"; return; fi
+  if ck_first_env COORDKIT_BUS_ROOT CLAUDE_BUS_ROOT CODEX_BUS_ROOT GEMINI_BUS_ROOT; then return; fi
   top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
   if [ -n "$top" ]; then printf '%s' "$top"; return; fi
   dir="$cwd"
   while [ -n "$dir" ] && [ "$dir" != "/" ]; do
-    [ -d "$dir/.claude-bus" ] && { printf '%s' "$dir"; return; }
+    [ -d "$dir/.coordkit-bus" ] && { printf '%s' "$dir"; return; }
     dir="$(dirname "$dir")"
   done
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then printf '%s' "$CLAUDE_PROJECT_DIR"; return; fi
+  if ck_first_env COORDKIT_PROJECT_DIR CLAUDE_PROJECT_DIR CODEX_PROJECT_DIR GEMINI_PROJECT_DIR; then return; fi
   printf '%s' "$cwd"
 }
 
@@ -142,12 +181,12 @@ ck_toml_table_get() {  # <file> <table> <key>
 # "which precedence level supplied it?" (what /guard status reports).
 _ck_enforcement_resolve() {
   local v toml f
-  v="$(printf '%s' "${COORDKIT_ENFORCEMENT:-}" | tr '[:upper:]' '[:lower:]')"
+  v="$(ck_first_env COORDKIT_ENFORCEMENT CLAUDE_ENFORCEMENT CODEX_ENFORCEMENT GEMINI_ENFORCEMENT | tr '[:upper:]' '[:lower:]')"
   case "$v" in
     guard|warn) printf '%s|env COORDKIT_ENFORCEMENT' "$v"; return ;;
   esac
 
-  toml="${COORDKIT_COORD_TOML:-$(resolve_root "$PWD")/.claude/coord/coord.toml}"
+  toml="$(ck_coord_toml "$PWD")"
   v="$(ck_toml_table_get "$toml" enforcement mode 2>/dev/null | tr '[:upper:]' '[:lower:]')"
   case "$v" in
     guard|warn) printf '%s|repo %s' "$v" "$toml"; return ;;

@@ -13,7 +13,7 @@ bus's phases; see [§8](#8-the-bus-and-guard-mode) for where guard fits.
 
 ## 1. State layout
 
-Everything lives under `<repo>/.claude-bus/`:
+Everything lives under `<repo>/.coordkit-bus/`:
 
 ```
 agents/<sid>.json    heartbeat: {sid, branch, cwd, task, files, last_seen}
@@ -66,7 +66,9 @@ plain shell (not from inside a live session) run under a constant `sid=cli`
 identity — deliberately, this one case is *not* resolved to the real
 session id the way `claim`/`done`/`tasks` are (see §5), because there's no
 "who is this instance" question to answer for a broadcast; `all` targets
-every live agent regardless of who sent it.
+every live agent regardless of who sent it. The runtime also honors
+`COORDKIT_SESSION_ID` and `COORDKIT_PROJECT_DIR`, falling back to the legacy
+`CLAUDE_*` names when present so existing Claude Code setups keep working.
 
 ## 5. The task board — now just a front-end over the ledger
 

@@ -9,13 +9,13 @@ set -uo pipefail
 # resolve_root() / ck_actor() / ck_clock_c() come from the shared library, so
 # migrate resolves the same repo and mints the same actor id as the ledger.
 # shellcheck source=./common.sh
-. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh"
+. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}/scripts/common.sh"
 
 ROOT="$(ck_plugin_root)"
 SCHEMA_DIR="${ROOT}/schema"
 
-repo="$(resolve_root "${CLAUDE_PROJECT_DIR:-$PWD}")"
-bus="${repo}/.claude-bus"
+repo="$(resolve_root "$PWD")"
+bus="${repo}/.coordkit-bus"
 ledger="${bus}/ledger.jsonl"
 lock="${bus}/.ledger.lock"
 mkdir -p "$bus" 2>/dev/null || { echo "coordkit migrate: cannot create $bus" >&2; exit 1; }

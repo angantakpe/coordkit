@@ -2,7 +2,7 @@
 
 `plugins/coordkit/scripts/ledger.sh` is coordkit's shared-context layer.
 It sits **on top of** the bus (`docs/BUS.md`) — it reuses the bus's per-repo
-heartbeats (`.claude-bus/agents/<sid>.json`) to decide whether a session is
+heartbeats (`.coordkit-bus/agents/<sid>.json`) to decide whether a session is
 still alive, but it answers a different question. The bus tells you *who else
 is here and what they're touching*; the ledger gives every instance **one
 shared, append-only source of truth** — decisions, notes, questions, and a
@@ -11,7 +11,7 @@ every turn.
 
 ## 1. Storage: one JSON event per line, never edited
 
-Every write appends a line to `.claude-bus/ledger.jsonl` (or, in git/logstore
+Every write appends a line to `.coordkit-bus/ledger.jsonl` (or, in git/logstore
 mode, to this machine's own actor-partitioned segment file — see
 [Transports](#5-transports) below). A line is **never** edited or deleted,
 only appended. Each event carries:
@@ -93,15 +93,16 @@ digest` (alias `catchup`) is the same thing from the ledger's own CLI.
 
 ## 4. The trust gate — why a cloned repo can't just talk to your model
 
-A **committed** `.claude/coord/coord.toml` can select `mode = "git"`, which
-flips a repo into reading `.claude/coord/log/**/*.ndjson` files as its ledger
-— by design, so a fresh `git clone` auto-joins a team's shared coordination
-room with zero setup. The problem: nothing stops a *hostile* repo from also
-committing fabricated `.ndjson` event files there. Without a gate, cloning
-such a repo would inject the attacker's fake "decisions" and "tasks" into your
-context at `SessionStart`, before you'd typed a single word — and `next`
-would auto-claim and hand the model an attacker-authored task body as if it
-were legitimate.
+A **committed** `coord.toml` can select `mode = "git"`, which flips a repo
+into reading `coord/log/**/*.ndjson` files as its ledger when the runtime is
+pointed there by `COORDKIT_COORD_TOML` or `COORDKIT_COORD_DIR` (the legacy
+`CLAUDE_*` names still work too). That is by design, so a fresh `git clone`
+auto-joins a team's shared coordination room with zero setup. The problem:
+nothing stops a *hostile* repo from also committing fabricated `.ndjson` event
+files there. Without a gate, cloning such a repo would inject the attacker's
+fake "decisions" and "tasks" into your context at `SessionStart`, before you'd
+typed a single word — and `next` would auto-claim and hand the model an
+attacker-authored task body as if it were legitimate.
 
 So: a committed `coord.toml` selecting git/relay mode is **not enough** to
 auto-activate log reads on its own. The repo also has to be explicitly
@@ -113,13 +114,14 @@ cobus distrust   # revoke it
 ```
 
 Trust is recorded per-repo (keyed by the git remote URL, or a path hash if
-there's no remote) in `${CLAUDE_PLUGIN_DATA}/trust.json` — this machine's own
-persistent decision, not something a repo can grant itself. An untrusted repo
-silently falls back to local-only mode (never blocks, never errors) and gets
-one advisory line in the SessionStart digest telling you sharing was
-requested but not enabled. Setting `COORDKIT_MODE`/`COORDKIT_USE_LOGSTORE`
-directly in your own environment is *your* explicit decision and still
-activates immediately — the gate only applies to the toml-derived path.
+there's no remote) in `${COORDKIT_DATA:-${CLAUDE_PLUGIN_DATA}}/trust.json` —
+this machine's own persistent decision, not something a repo can grant itself.
+An untrusted repo silently falls back to local-only mode (never blocks, never
+errors) and gets one advisory line in the SessionStart digest telling you
+sharing was requested but not enabled. Setting `COORDKIT_MODE`/
+`COORDKIT_USE_LOGSTORE` directly in your own environment is *your* explicit
+decision and still activates immediately — the gate only applies to the
+toml-derived path.
 
 **Not to be confused with enforcement mode.** Everything above — `COORDKIT_MODE`
 and `coord.toml`'s top-level `mode` — is about the **transport**
@@ -148,7 +150,7 @@ behind a shared `logstore_*` interface in `transports/lib.sh`; see
 property for the ledger's own logic: **the read path is identical regardless
 of transport** — `resolve_root()`, dedup, and ordering all come from the one
 canonical `plugins/coordkit/scripts/common.sh`, so direct mode and logstore
-mode can never resolve to two different `.claude-bus` trees.
+mode can never resolve to two different `.coordkit-bus` trees.
 
 ## 6. CLI / command reference
 

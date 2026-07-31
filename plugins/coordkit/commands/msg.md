@@ -1,5 +1,5 @@
 ---
-description: Send a message to another live Claude instance in this repo (delivered on its next turn)
+description: Send a message to another live instance in this repo (delivered on its next turn)
 argument-hint: <all|sid8|branch:name> <message text>
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/bus.sh msg:*)
 ---

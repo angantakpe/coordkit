@@ -1,8 +1,9 @@
 # coordkit
 
-A Claude Code plugin **marketplace** that packages a working **same-machine,
-multi-instance coordination system** so it becomes installable, shareable, and
-semver-versioned instead of a hand-wired set of `~/.claude/hooks/*.sh` scripts.
+A host-adapter marketplace for same-machine, multi-instance coordination. It
+packages a working coordination core so it becomes installable, shareable, and
+semver-versioned instead of a hand-wired set of host-specific hook scripts.
+This repository currently ships the Claude Code adapter.
 (The repo/marketplace is named `coordkit` after its flagship plugin — see the
 scope note below for why that's an imperfect fit now that it also ships
 `skillkit`.)
@@ -21,7 +22,7 @@ It ships **two plugins**:
 
 | Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **coordkit** | 3.0.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard. Tracks who else is live in a repo and which files they touch and surfaces it so parallel Claude instances (and you) can reconcile instead of stepping on each other — and, where you ask for it, *denies* an edit that would clobber theirs. |
+| **coordkit** | 3.0.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard. Tracks who else is live in a repo and which files they touch and surfaces it so parallel sessions can reconcile instead of stepping on each other — and, where you ask for it, *denies* an edit that would clobber theirs. |
 | **skillkit** | 1.0.2   | **Suggest-only — never blocks**                            | Skill auto-activation. On every prompt it matches layered`skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
 
 > **`coordguard` has been removed.** Through 2.x, the hard anti-clobber
@@ -44,9 +45,27 @@ under the hood:
 - **[docs/LEDGER.md](docs/LEDGER.md)** — the shared-context layer: the
   event-sourcing model, the task queue (leases, auto-claim, work-stealing),
   pagination/digests, and the git-mode trust gate.
+- **[docs/HOSTS.md](docs/HOSTS.md)** — the host/adapter split: what belongs to
+  the shared coordination core, what stays adapter-specific, and what is still
+  Claude-only today.
 - **[Enforcement modes](#enforcement-modes)** (below) — the guard layer: what
   `warn` vs `guard` mode actually do, how the mode is resolved, and the honest
   version of the safety story now that both live in one plugin.
+
+## Host model
+
+coordkit's coordination core is host-neutral. A host adapter is the thin layer
+that maps a specific host's lifecycle events, environment variables, command
+surface, and packaging conventions onto the shared bus, ledger, and guard.
+
+The Claude Code adapter is the one shipped in this repository today. Its
+`CLAUDE_*` variables, `.claude/` paths, and slash-command wiring are adapter
+details, not requirements of the coordination model itself. The runtime now
+accepts `COORDKIT_*`, `CLAUDE_*`, `CODEX_*`, and `GEMINI_*` adapter aliases
+for the shared shell helpers. Adapter slots for Claude Code, Codex, and Gemini
+live in [`plugins/coordkit/adapters/`](/home/anga/workspace/projects/coordkit/plugins/coordkit/adapters/).
+The Claude slot is shipped; the Codex and Gemini slots are scaffolded and use
+the same core concepts and on-disk coordination state.
 
 ## Enforcement modes
 
@@ -68,7 +87,8 @@ underneath you.
 Note that these are two different questions, not one behavior with the volume
 turned up. The warning asks *"is a live sibling working in this file?"*; the deny
 asks *"did this file change under me?"* — which catches cases the warning cannot
-(a sibling that already exited, a `git pull`, an editor outside Claude), and
+(a sibling that already exited, a `git pull`, an editor outside the Claude
+adapter), and
 misses cases the warning catches (a live sibling who hasn't written yet). Both
 run in guard mode, guard's check first. See
 [docs/BUS.md §8](docs/BUS.md#8-the-bus-and-guard-mode) for the side-by-side.
@@ -157,7 +177,7 @@ own axis:
    configurable and the ledger accepts either version on read; this is the
    on-disk format axis, versioned independently of the tooling.
 3. **Transport** *(`plugins/coordkit/transports/`)* — how events move: `local`
-   (the per-repo `.claude-bus/` directory), and optional `git` / `relay`
+   (the per-repo `.coordkit-bus/` directory), and optional `git` / `relay`
    backends behind a common `lib.sh`. This is the delivery axis.
 
 ## Install
@@ -222,7 +242,8 @@ you confusing double denies.
 ### Scopes
 
 - **User scope** (default) — installs for your account across every project. Best
-  for coordkit, since you want awareness everywhere you run Claude.
+  for coordkit, since you want awareness everywhere you run the Claude
+  adapter.
 - **Project scope** — check the plugin into a repository so every collaborator who
   clones it gets the same coordination behavior. Project-scope plugins load only
   after the repository trust gate, and components that run code (hooks) are
@@ -298,7 +319,7 @@ Both prior caveats were tested on Claude Code **v2.1.193** (empirical dry-run vi
 
 ## Maintenance — garbage-collecting a bus
 
-`.claude-bus/` state is pruned opportunistically (dead heartbeats and their
+`.coordkit-bus/` state is pruned opportunistically (dead heartbeats and their
 orphaned claims at `SessionStart`; `activity.log` auto-trimmed past 600 lines),
 but nothing ever cleans a bus you've stopped using. `cobus gc` is the manual
 pass — **dry-run by default, it deletes nothing without `--apply`**:

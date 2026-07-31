@@ -46,8 +46,8 @@
 # actually called. (The eager adapter-source at the bottom is required so that, e.g.,
 # bin/sync.sh can `. lib.sh` and immediately find __git_sync.)
 #
-# Adapter files are resolved under ${CLAUDE_PLUGIN_ROOT}/transports/ (falling back
-# to this file's own directory when the env var isn't injected).
+# Adapter files are resolved under ${COORDKIT_PLUGIN_ROOT}/transports/ (falling back
+# to host aliases and then this file's own directory when no env var is injected).
 
 # --------------------------------------------------------------------------- #
 # Path / root resolution (all in-memory; no fs mutation)
@@ -56,10 +56,10 @@
 # Directory that holds the adapter files. Prefer the plugin runtime's env var,
 # fall back to this file's own location (lib.sh lives in transports/).
 __logstore_transports_dir() {
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/transports" ]; then
-    printf '%s' "${CLAUDE_PLUGIN_ROOT}/transports"
-    return 0
-  fi
+  local root
+  for root in "${COORDKIT_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}" "${CODEX_PLUGIN_ROOT:-}" "${GEMINI_PLUGIN_ROOT:-}"; do
+    [ -n "$root" ] && [ -d "$root/transports" ] && { printf '%s' "$root/transports"; return 0; }
+  done
   # BASH_SOURCE[0] inside a function = the file where the function is defined.
   ( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd )
 }
@@ -68,10 +68,10 @@ __logstore_transports_dir() {
 # prefer the plugin runtime's env var, fall back to this file's own location
 # (lib.sh lives in transports/, so common.sh is ../scripts/common.sh).
 __logstore_common() {
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/common.sh" ]; then
-    printf '%s' "${CLAUDE_PLUGIN_ROOT}/scripts/common.sh"
-    return 0
-  fi
+  local root
+  for root in "${COORDKIT_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}" "${CODEX_PLUGIN_ROOT:-}" "${GEMINI_PLUGIN_ROOT:-}"; do
+    [ -n "$root" ] && [ -f "$root/scripts/common.sh" ] && { printf '%s' "$root/scripts/common.sh"; return 0; }
+  done
   printf '%s/../scripts/common.sh' "$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd )"
 }
 # Defines resolve_root()/branch_of()/ck_* — no I/O, so this keeps sourcing lib.sh
@@ -83,8 +83,10 @@ __logstore_common() {
 # scripts/common.sh, so the ledger's own state and the transport's segment state
 # can never split across two different trees. Precedence:
 #
-#   CLAUDE_BUS_ROOT > git toplevel > nearest ancestor with .claude-bus/ >
-#   CLAUDE_PROJECT_DIR > cwd
+#   COORDKIT_BUS_ROOT / CLAUDE_BUS_ROOT / CODEX_BUS_ROOT / GEMINI_BUS_ROOT >
+#   git toplevel > nearest ancestor with .coordkit-bus/ >
+#   COORDKIT_PROJECT_DIR / CLAUDE_PROJECT_DIR / CODEX_PROJECT_DIR /
+#   GEMINI_PROJECT_DIR > cwd
 #
 # The transport has no cwd argument to thread through — it always resolves
 # relative to the process's own $PWD, which is what the ledger passes down too.
@@ -94,7 +96,7 @@ __logstore_repo_root() {
 
 # Where coord.toml lives (the committed, secret-free pointer template once installed).
 __logstore_coordtoml() {
-  printf '%s' "${COORDKIT_COORD_TOML:-$(__logstore_repo_root)/.claude/coord/coord.toml}"
+  ck_coord_toml "$(__logstore_repo_root)"
 }
 
 # --------------------------------------------------------------------------- #

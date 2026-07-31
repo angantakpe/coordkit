@@ -25,7 +25,7 @@ ledger scripts ─► logstore_append / logstore_readall / logstore_tail / logst
 | relay | team, real-time    | fan-out POST over a durable backing | curl + backing | the **backing** (local/git), never the relay |
 
 - **local** (default): exactly today's same-machine behaviour. Each actor appends to
-  its own `.claude-bus/log/<actor>/seg.ndjson`; `readall` is the union of all those
+  its own `.coordkit-bus/log/<actor>/seg.ndjson`; `readall` is the union of all those
   segments plus the legacy flat `ledger.jsonl`. Zero network, zero daemons, fast.
 - **git**: each actor appends to its own `.claude/coord/log/<actor>/<epoch>-NNNN.ndjson`.
   That `log/` path is **gitignored on your branch** — replication happens entirely inside
@@ -65,7 +65,7 @@ Concretely:
 - Switching `mode` is a safe cutover for the READ path either direction — readers always
   recompute the same projection from the union of events. The one place data actually
   needs to move is **local → git**, because the two modes read different trees
-  (`local`: `.claude-bus/log` + legacy `.claude-bus/ledger.jsonl`; `git`: `.claude/coord/log`).
+  (`local`: `.coordkit-bus/log` + legacy `.coordkit-bus/ledger.jsonl`; `git`: `.claude/coord/log`).
   `scripts/init-git.sh` handles that with a **one-time migration** on `init-git`: it copies
   the prior local segments (and folds the legacy flat ledger under a synthetic actor) into
   `.claude/coord/log/`. It is a copy of append-only files and is idempotent (never shrinks
@@ -74,7 +74,7 @@ Concretely:
 ## Privacy rule — the activity firehose stays local
 
 coordkit's PostToolUse hook records a high-frequency **activity firehose**: every
-file touch and every `Bash` invocation, written to `.claude-bus/activity.log`. That
+file touch and every `Bash` invocation, written to `.coordkit-bus/activity.log`. That
 stream is **local-only and MUST NOT replicate cross-team.**
 
 - Only **deliberate ledger events** (notes, decisions, tasks, claims, answers — the

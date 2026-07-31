@@ -13,8 +13,8 @@
 # dedicated log branch (COORDKIT_SYNC_BRANCH, default "coordkit/log"). That way sync
 # never touches your checkout, index, or branch.
 #
-# On first run this also MIGRATES any prior local-mode log (.claude-bus/log/** and the
-# legacy .claude-bus/ledger.jsonl) into .claude/coord/log/ so switching local→git is
+# On first run this also MIGRATES any prior local-mode log (.coordkit-bus/log/** and the
+# legacy .coordkit-bus/ledger.jsonl) into .claude/coord/log/ so switching local→git is
 # lossless — a one-time copy of append-only files (idempotent; never shrinks a file).
 #
 # It does NOT commit for you (so you can review) and writes NO secrets. After running:
@@ -27,7 +27,7 @@
 set -uo pipefail
 
 # shellcheck source=./common.sh
-. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh"
+. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}/scripts/common.sh"
 
 ROOT_PLUGIN="$(ck_plugin_root)"
 TPL="${ROOT_PLUGIN}/templates"
@@ -39,7 +39,7 @@ remote="${2:-}"
 # deliberately NOT the shared resolve_root(): that one honours CLAUDE_BUS_ROOT
 # verbatim and falls back to a non-git cwd, whereas git mode needs the true git
 # toplevel and must HARD-FAIL when there isn't one.
-repo="$(git -C "${CLAUDE_BUS_ROOT:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || {
+repo="$(git -C "$(ck_project_dir)" rev-parse --show-toplevel 2>/dev/null)" || {
   echo "coordkit init-git: not inside a git repo. git mode needs a git remote." >&2
   echo "  cd into your project repo first (or 'git init'), then re-run." >&2
   exit 1
@@ -77,7 +77,7 @@ _set room_id "$room"
 
 # 4) ensure the project .gitignore keeps local-only coordination state out of the
 #    user's branch. Three entries:
-#      /.claude-bus/            ephemeral local bus (heartbeats/activity firehose)
+#      /.coordkit-bus/            ephemeral local bus (heartbeats/activity firehose)
 #      /.claude/coord/log/      the event log — replicated via the private worktree
 #                               on the coordkit/log branch, NEVER committed here
 #      /.claude/coord/.sync/    the private sync worktree itself
@@ -94,7 +94,7 @@ _ignore() { # pattern
 [ -f "$gi" ] && ! grep -q '^# coordkit:' "$gi" 2>/dev/null && \
   printf '\n# coordkit: local-only coordination state (never shared on your branch)\n' >> "$gi"
 [ -f "$gi" ] || printf '# coordkit: local-only coordination state (never shared on your branch)\n' > "$gi"
-_ignore '/.claude-bus/'
+_ignore '/.coordkit-bus/'
 _ignore '/.claude/coord/log/'
 _ignore '/.claude/coord/.sync/'
 _ignore '/.claude/coord/.coord.lock*'
@@ -103,7 +103,7 @@ _ignore '/.claude/coord/.coord.lock*'
 #    Append-only files: copy each per-actor segment when the destination is missing or
 #    the source is strictly larger; fold the legacy flat ledger under a synthetic actor
 #    (readall globs *.ndjson under log/, dedups by eid, and orders by clock).
-bus="${CLAUDE_BUS_DIR:-${repo}/.claude-bus}"
+bus="${CLAUDE_BUS_DIR:-${repo}/.coordkit-bus}"
 _copy_if_grown() { # src dst
   local src="$1" dst="$2" ssz dsz tmp
   [ -f "$src" ] || return 0

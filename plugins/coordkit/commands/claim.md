@@ -1,5 +1,5 @@
 ---
-description: Claim a task on the shared command-center board so other Claude instances in this repo know you own it
+description: Claim a task on the shared command-center board so other live instances in this repo know you own it
 argument-hint: <short task description>
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/bus.sh claim:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/bus.sh tasks:*)
 ---

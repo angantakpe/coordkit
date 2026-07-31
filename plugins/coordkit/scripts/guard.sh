@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# guard.sh — prevent clobbering files a sibling Claude instance touched.
+# guard.sh — prevent clobbering files a sibling coordkit instance touched.
 # (Was coordguard's scripts/concurrency-guard.sh; merged into coordkit in 3.0.0.)
 #
-# The user routinely runs several Claude Code instances in the same repo at once.
+# The user routinely runs several coordkit instances in the same repo at once.
 # This tracks a fingerprint (mtime + size) of each file THIS session has Read or
 # written, and DENIES a Write/Edit when the file on disk has changed since we last
 # saw it (or we never saw it) — the signature of another instance having edited it.
@@ -67,7 +67,7 @@ _CK_GUARD_SH=1
 # missing common.sh means a broken install; without the gate we must NOT reach
 # the deny path at all, so bail out defining nothing rather than fail into it.
 # shellcheck source=./common.sh
-. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh" || return 0 2>/dev/null
+. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}/scripts/common.sh" || return 0 2>/dev/null
 
 # --------------------------------------------------------------------------- #
 # State layout
@@ -78,19 +78,28 @@ _CK_GUARD_SH=1
 # another local user can pre-create the tree and make our mkdir/writes fail silently,
 # or plant fake fingerprints. Fall back rather than fail if nothing else is writable.
 _GUARD_BASE=""
+_guard_tree_name() {
+  if [ -n "${COORDKIT_GUARD_TREE:-}" ]; then printf '%s' "$COORDKIT_GUARD_TREE"; return 0; fi
+  if [ -n "${CLAUDE_GUARD_TREE:-}" ]; then printf '%s' "$CLAUDE_GUARD_TREE"; return 0; fi
+  if [ -n "${CODEX_GUARD_TREE:-}" ]; then printf '%s' "$CODEX_GUARD_TREE"; return 0; fi
+  if [ -n "${GEMINI_GUARD_TREE:-}" ]; then printf '%s' "$GEMINI_GUARD_TREE"; return 0; fi
+  printf 'claude-concurrency'
+}
+
 _guard_base() {
   [ -n "$_GUARD_BASE" ] && { printf '%s' "$_GUARD_BASE"; return; }
   local cands=() cand
-  [ -n "${XDG_RUNTIME_DIR:-}" ] && cands+=("${XDG_RUNTIME_DIR}/claude-concurrency")
-  [ -n "${HOME:-}" ] && cands+=("${HOME}/.cache/claude-concurrency")
-  cands+=("${TMPDIR:-/tmp}/claude-concurrency")
+  local tree="$(_guard_tree_name)"
+  [ -n "${XDG_RUNTIME_DIR:-}" ] && cands+=("${XDG_RUNTIME_DIR}/${tree}")
+  [ -n "${HOME:-}" ] && cands+=("${HOME}/.cache/${tree}")
+  cands+=("${TMPDIR:-/tmp}/${tree}")
   for cand in "${cands[@]}"; do
     if mkdir -p "$cand" 2>/dev/null && [ -w "$cand" ]; then
       chmod 700 "$cand" 2>/dev/null
       _GUARD_BASE="$cand"; printf '%s' "$_GUARD_BASE"; return
     fi
   done
-  _GUARD_BASE="${TMPDIR:-/tmp}/claude-concurrency"
+  _GUARD_BASE="${TMPDIR:-/tmp}/$tree"
   printf '%s' "$_GUARD_BASE"
 }
 
@@ -177,10 +186,10 @@ guard_check() {
         [ -n "$cur_sec" ] && [ "$cur_sec" = "$seen" ] && return 0
         ;;
     esac
-    reason="⚠️ Concurrency guard: \"${file}\" changed on disk since you last read it — another Claude instance likely edited it. (Changes made by this session's own Bash commands are normally auto-absorbed; if this was one, the file was already stale before that command ran.) Re-Read the file, reconcile your change with what's now there, then retry. (If you're certain you want to override, tell the user.)"
+    reason="⚠️ Concurrency guard: \"${file}\" changed on disk since you last read it — another coordkit instance likely edited it. (Changes made by this session's own Bash commands are normally auto-absorbed; if this was one, the file was already stale before that command ran.) Re-Read the file, reconcile your change with what's now there, then retry. (If you're certain you want to override, tell the user.)"
   else
     # File exists but this session never Read or wrote it.
-    reason="⚠️ Concurrency guard: \"${file}\" exists on disk but this session hasn't Read it — it may belong to another Claude instance running in this repo, or was created by a shell command (a hook can't tell which files a Bash call creates). Read it first to see its current contents, then decide whether to edit/overwrite."
+    reason="⚠️ Concurrency guard: \"${file}\" exists on disk but this session hasn't Read it — it may belong to another coordkit instance running in this repo, or was created by a shell command (a hook can't tell which files a Bash call creates). Read it first to see its current contents, then decide whether to edit/overwrite."
   fi
 
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
@@ -269,7 +278,7 @@ guard_cleanup() {
   sid="$(_guard_sid "$input")"
   # _guard_sid already normalized this to a single, non-empty path component;
   # re-check here so a hostile session_id (e.g. "../..") can never make us rm
-  # outside the claude-concurrency tree.
+  # outside the guard state tree.
   case "$sid" in
     ""|.|..|*/*|*$'\n'*) return 0 ;;
   esac
@@ -290,7 +299,7 @@ guard_cleanup() {
 # --------------------------------------------------------------------------- #
 
 _guard_toml_path() {
-  printf '%s' "${COORDKIT_COORD_TOML:-$(resolve_root "$PWD")/.claude/coord/coord.toml}"
+  ck_coord_toml "$PWD"
 }
 
 # Write [enforcement].mode into the repo's coord.toml, creating the file or the

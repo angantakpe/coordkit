@@ -1,0 +1,9 @@
+{
+  "host": "claude-code",
+  "status": "shipped",
+  "runtime": "shared-shell",
+  "manifestPath": "../../.claude-plugin/plugin.json",
+  "hooksPath": "../../hooks/hooks.json",
+  "commandsPath": "../../commands",
+  "notes": "Current Claude Code adapter. Uses the shared coordkit runtime and Claude hook surface."
+}

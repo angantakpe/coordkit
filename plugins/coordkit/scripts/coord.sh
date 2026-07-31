@@ -39,7 +39,7 @@
 # Defensive throughout: always exits 0 so a bug here can never wedge a session.
 set -uo pipefail
 
-CK_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}"
+CK_ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}"
 
 # A missing library means a broken install — exit 0 (allow) rather than run on
 # with half the coordination layer loaded.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# bus.sh — a per-repo "command center" so several Claude Code instances
+# bus.sh — a per-repo "command center" so several coordkit instances
 # running in the same project are aware of each other.
 #
 # AWARENESS layer (complements guard.sh, the opt-in anti-clobber layer): the
@@ -9,7 +9,7 @@
 # what they touch, warns SOFTLY on collisions, gives a live UI, a task board, and
 # inter-instance messaging. The bus never blocks a tool call, in any mode.
 #
-# State in <repo>/.claude-bus/:
+# State in <repo>/.coordkit-bus/:
 #   agents/<sid>.json   heartbeat {sid,branch,cwd,task,files,last_seen}
 #   claims/<sha>.json   soft FILE lock {path,sid,ts} — unrelated to TASK claims
 #   inbox/<sid>/*.msg   messages waiting for that instance
@@ -75,13 +75,13 @@ mtime(){ stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 
 # resolve_root() / branch_of() — canonical implementations, shared with the
 # ledger, the transports and the CLI entrypoints so no two of them can ever
-# resolve a different .claude-bus tree. Plugin runtime injects
-# CLAUDE_PLUGIN_ROOT; the fallback keeps a direct `bash scripts/bus.sh`
+# resolve a different .coordkit-bus tree. The host runtime may inject
+# COORDKIT_PLUGIN_ROOT; the fallback keeps a direct `bash scripts/bus.sh`
 # invocation working from a repo checkout.
 # A missing common.sh means a broken install; exit 0 rather than run on with an
 # unresolvable root, per this script's never-wedge-a-session rule.
 # shellcheck source=./common.sh
-. "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/common.sh" || exit 0
+. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}/scripts/common.sh" || exit 0
 
 # ── input handling ──────────────────────────────────────────────────────────
 # dashboard/watch take a repo arg; everything else reads hook/statusline JSON.
@@ -94,9 +94,9 @@ case "$phase" in
     # work-stealing liveness check needs a sid with an actual bus heartbeat,
     # not the constant "cli" (which never has one and would look instantly
     # abandoned). msg keeps the "cli"-only behavior below; see its own note.
-    input=""; cwd="${CLAUDE_PROJECT_DIR:-$PWD}"; sid="${CLAUDE_SESSION_ID:-cli}" ;;
+    input=""; cwd="$(ck_project_dir)"; sid="$(ck_session_id)" ;;
   msg)
-    input=""; cwd="${CLAUDE_PROJECT_DIR:-$PWD}"; sid="cli" ;;
+    input=""; cwd="$(ck_project_dir)"; sid="cli" ;;
   *)
     input="$(cat)"
     cwd="$(printf '%s' "$input" | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null)"
@@ -105,7 +105,7 @@ case "$phase" in
 esac
 
 root="$(resolve_root "$cwd")"
-bus="${root}/.claude-bus"
+bus="${root}/.coordkit-bus"
 agents="${bus}/agents"; claims="${bus}/claims"; inbox="${bus}/inbox"
 log="${bus}/activity.log"
 sid8="${sid:0:8}"
@@ -159,21 +159,21 @@ heartbeat() {  # $1=task (or "") $2=file-to-append (or "")
 agent_age()    { local f="${agents}/$1.json" l; l="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$l" ] && l=0; echo $(( $(now) - l )); }
 agent_live()   { [ -f "${agents}/$1.json" ] && [ "$(agent_age "$1")" -le "$STALE_HARD" ]; }
 
-# tab-rows of OTHER live agents: sid8 \t state \t age \t branch \t task \t files
+# tab-rows of OTHER live agents: sid8 \t state \t age \t branch \t cwd \t task \t files
 others_live() {
   # One jq per agent file (not one per field): @tsv also escapes any literal
   # tab inside task/branch, so the tab-separated contract stays intact.
-  local t f s last age br task files state; t="$(now)"
+  local t f s last age br cwd task files state; t="$(now)"
   for f in "$agents"/*.json; do
     [ -e "$f" ] || continue
-    IFS=$'\t' read -r s last br task files <<< "$(jq -r \
-      '[.sid // "", .last_seen // 0, .branch // "?", .task // "", ((.files // [])|join(", "))] | @tsv' \
+    IFS=$'\t' read -r s last br cwd task files <<< "$(jq -r \
+      '[.sid // "", .last_seen // 0, .branch // "?", .cwd // "", .task // "", ((.files // [])|join(", "))] | @tsv' \
       "$f" 2>/dev/null)"
     [ "$s" = "$sid" ] && continue
     case "${last:-}" in ''|*[!0-9]*) last=0 ;; esac
     age=$(( t - last )); [ "$age" -gt "$STALE_HARD" ] && continue
     state="live"; [ "$age" -gt "$STALE_SOFT" ] && state="idle"
-    printf '%s\t%s\t%ss\t%s\t%s\t%s\n' "${s:0:8}" "$state" "$age" "$br" "$task" "$files"
+    printf '%s\t%s\t%ss\t%s\t%s\t%s\t%s\n' "${s:0:8}" "$state" "$age" "$br" "$cwd" "$task" "$files"
   done
 }
 
@@ -235,20 +235,28 @@ case "$phase" in
     msgs="$(drain_inbox)"; have_msgs=$?
     rows="$(others_live)"
     samebr=""
+    samebr_lines=""
     if [ -n "$rows" ]; then
-      while IFS=$'\t' read -r id st age br task files; do
-        [ "$br" = "$curbr" ] && [ "$br" != "no-git" ] && [ "$br" != "detached" ] && [ -n "$br" ] && samebr+="${id} "
+      while IFS=$'\t' read -r id st age br cwd task files; do
+        [ "$br" = "$curbr" ] && [ "$br" != "no-git" ] && [ "$br" != "detached" ] && [ -n "$br" ] || continue
+        samebr+="${id} "
+        samebr_lines+="  • ${id}"
+        [ -n "$cwd" ] && samebr_lines+=" path:${cwd}"
+        samebr_lines+=$'\n'
       done <<< "$rows"
     fi
     ctx=""
     [ "$have_msgs" -eq 0 ] && [ -n "$msgs" ] && ctx+="📨 Messages waiting for you:"$'\n'"${msgs}"
     if [ -n "$samebr" ]; then
-      ctx+="⚠️  COLLISION RISK: instance(s) ${samebr}are live on your SAME branch (${curbr}). Coordinate or use a separate branch before committing."$'\n'
+      ctx+="⚠️  COLLISION RISK: live instance(s) on your SAME branch (${curbr}):"$'\n'
+      ctx+="${samebr_lines}"
+      ctx+="Coordinate or use a separate branch before committing."$'\n'
     fi
     if [ -n "$rows" ]; then
-      ctx+="🛰️  Other Claude instances live in this repo (.claude-bus):"$'\n'
-      while IFS=$'\t' read -r id st age br task files; do
+      ctx+="🛰️  Other coordkit instances live in this repo (.coordkit-bus):"$'\n'
+      while IFS=$'\t' read -r id st age br cwd task files; do
         ctx+="  • ${id} [${st}, ${age} ago] branch:${br}"
+        [ -n "$cwd" ] && ctx+=" path:${cwd}"
         [ -n "$task" ]  && ctx+=" — task: ${task}"
         [ -n "$files" ] && ctx+=" — touching: ${files}"
         ctx+=$'\n'
@@ -267,7 +275,7 @@ case "$phase" in
     [ -n "$prompt" ] && heartbeat "$prompt" ""
     msgs="$(drain_inbox)"; have_msgs=$?
     if [ "$have_msgs" -eq 0 ] && [ -n "$msgs" ]; then
-      ctx="📨 Message(s) from another Claude instance in this repo:"$'\n'"${msgs}"
+      ctx="📨 Message(s) from another coordkit instance in this repo:"$'\n'"${msgs}"
       printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%s}}\n' \
         "$(printf '%s' "$ctx" | jq -Rs .)"
     fi
@@ -325,8 +333,8 @@ case "$phase" in
     mk="${bus}/.notify-${key}"
     do_notify=1
     if [ -f "$mk" ]; then [ $(( $(now) - $(mtime "$mk") )) -lt "$NOTIFY_DEBOUNCE" ] && do_notify=0; fi
-    if [ "$do_notify" -eq 1 ]; then : > "$mk" 2>/dev/null; notify "Claude collision" "${owner:0:8} (branch:${obr}) is also editing ${rel##*/}"; fi
-    msg="🔔 Another live Claude instance (${owner:0:8}, branch:${obr}, active ${age}s ago) recently edited \"${rel}\". Soft lock: not blocking — reconcile, don't clobber. Run /bus or /msg ${owner:0:8} to coordinate."
+    if [ "$do_notify" -eq 1 ]; then : > "$mk" 2>/dev/null; notify "coordkit collision" "${owner:0:8} (branch:${obr}) is also editing ${rel##*/}"; fi
+    msg="🔔 Another live coordkit instance (${owner:0:8}, branch:${obr}, active ${age}s ago) recently edited \"${rel}\". Soft lock: not blocking — reconcile, don't clobber. Run /bus or /msg ${owner:0:8} to coordinate."
     printf '{"systemMessage":%s,"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' \
       "$(printf '%s' "$msg" | jq -Rs .)" "$(printf '%s' "$msg" | jq -Rs .)"
     exit 0
@@ -471,11 +479,11 @@ case "$phase" in
     else BOLD=""; DIM=""; RED=""; GRN=""; YEL=""; CYN=""; RST=""; fi
 
     render() {
-      if [ ! -d "$bus" ]; then echo "No .claude-bus/ in ${root} — no instances have registered here yet."; return; fi
+      if [ ! -d "$bus" ]; then echo "No .coordkit-bus/ in ${root} — no instances have registered here yet."; return; fi
       local t rows col cany tany; t="$(now)"
-      printf '%b🛰️  Claude command center%b  %s  %b%s%b\n' "$BOLD" "$RST" "${root}" "$DIM" "$(iso)" "$RST"
+      printf '%b🛰️  coordkit command center%b  %s  %b%s%b\n' "$BOLD" "$RST" "${root}" "$DIM" "$(iso)" "$RST"
       printf '%bLIVE AGENTS%b\n' "$CYN" "$RST"
-      local any=0 s last age br task files state
+      local any=0 s last age br cwd task files state
       for f in "$agents"/*.json; do
         [ -e "$f" ] || continue
         last="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$last" ] && last=0
@@ -483,10 +491,12 @@ case "$phase" in
         any=1
         s="$(jq -r '.sid // ""' "$f" 2>/dev/null)"
         br="$(jq -r '.branch // "?"' "$f" 2>/dev/null)"
+        cwd="$(jq -r '.cwd // ""' "$f" 2>/dev/null)"
         task="$(jq -r '.task // "(no task yet)"' "$f" 2>/dev/null)"
         files="$(jq -r '(.files // []) | join(", ")' "$f" 2>/dev/null)"
         state="${GRN}live${RST}"; [ "$age" -gt "$STALE_SOFT" ] && state="${YEL}idle${RST}"
         printf '  %b%s%b [%b, %ds]  branch:%b%s%b\n' "$BOLD" "${s:0:8}" "$RST" "$state" "$age" "$YEL" "$br" "$RST"
+        [ -n "$cwd" ] && printf '      path:    %s\n' "$cwd"
         printf '      task:    %s\n' "$task"
         [ -n "$files" ] && printf '      %btouched:%b %s\n' "$DIM" "$RST" "$files"
       done
