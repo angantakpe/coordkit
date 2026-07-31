@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "coordkit",
   "displayName": "coordkit",
-  "version": "3.0.0",
-  "description": "Same-machine multi-instance coordination, packaged here as the Claude Code adapter: a per-repo bus + cross-instance ledger that tracks who else is live and which files they touch, and surfaces it. NEVER BLOCKS BY DEFAULT — out of the box these hooks only observe and warn. Now also includes the opt-in hard anti-clobber guard (formerly the coordguard plugin): off unless you run /guard on, and only then can a Write/Edit to a file another instance changed be denied.",
+  "version": "4.0.0",
+  "description": "Same-machine multi-instance coordination, packaged here as the Claude Code adapter: a per-repo bus + cross-instance ledger that tracks who else is live, which files they touch, and which subagents they're running, and surfaces it. NEVER BLOCKS BY DEFAULT — out of the box these hooks only observe and warn. Includes the opt-in hard anti-clobber guard (formerly the coordguard plugin, merged at 3.0.0): off unless you run /guard on. As of 4.0.0 also includes skill auto-activation (formerly the skillkit plugin): a UserPromptSubmit hook that matches prompts against layered skill-rules.json files and suggests skills, plus a shared roster of specialized agents and /dev-docs context-persistence commands available to every live instance.",
   "author": {
     "name": "codehornets",
     "email": "codehornets@gmail.com"
@@ -14,6 +14,13 @@
     "concurrency",
     "bus",
     "ledger",
+    "guard",
+    "anti-clobber",
+    "skills",
+    "auto-activation",
+    "agents",
+    "dev-docs",
+    "orchestration",
     "hooks"
   ],
   "license": "MIT"

@@ -36,6 +36,10 @@ What is not generalized yet:
 - A host-agnostic manifest format shared across all host runtimes.
 - Host-native event wiring for Codex and Gemini.
 - A non-Claude command surface for slash-command style interactions.
+- `scripts/skill-activation.sh` (merged in from skillkit at coordkit 4.0.0):
+  its rule-file discovery paths (`~/.claude/skills/skill-rules.json`,
+  `$CLAUDE_PROJECT_DIR/.claude/skills/skill-rules.json`) are still
+  Claude-adapter-specific, unlike the rest of the coordination core.
 
 Those are adapter/runtime responsibilities, not gaps in the shared coordination
 core.

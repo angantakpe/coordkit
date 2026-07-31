@@ -10,8 +10,12 @@
 # inter-instance messaging. The bus never blocks a tool call, in any mode.
 #
 # State in <repo>/.coordkit-bus/:
-#   agents/<sid>.json   heartbeat {sid,branch,cwd,task,files,last_seen}
-#   claims/<sha>.json   soft FILE lock {path,sid,ts} — unrelated to TASK claims
+#   agents/<sid>.json           heartbeat {sid,branch,cwd,task,files,last_seen}
+#   claims/<sha>.json           soft FILE lock {path,sid,ts} — unrelated to TASK claims
+#   subagents/<sid>/<tid>.json  a currently-running subagent this session launched:
+#                                {sid,tool_use_id,subagent_type,description,started_at}
+#                                — written at PreToolUse/Task, removed at PostToolUse/Task
+#                                (or on session end / gc if the session dies mid-call)
 #   inbox/<sid>/*.msg   messages waiting for that instance
 #   activity.log        feed: "<iso>\t<sid8>\t<verb>\t<detail>"
 #
@@ -28,7 +32,9 @@
 #   UserPromptSubmit        -> task     record current task + deliver inbox messages
 #   PostToolUse Write|Edit|NotebookEdit|Read|Bash -> record  feed + heartbeat + claims
 #   PreToolUse  Write|Edit|NotebookEdit -> check  soft collision warning + desktop notify
-#   SessionEnd              -> stop     drop heartbeat + release claims
+#   PreToolUse  Task        -> subagent-start  record a running subagent + soft same-type heads-up
+#   PostToolUse Task        -> subagent-stop   drop that subagent's running record
+#   SessionEnd              -> stop     drop heartbeat + release claims + subagent records
 #
 # SOURCING CONTRACT — the whole phase dispatch lives in bus_main(), which still
 # uses `exit` freely for control flow (it predates being a library and its
@@ -107,6 +113,7 @@ esac
 root="$(resolve_root "$cwd")"
 bus="${root}/.coordkit-bus"
 agents="${bus}/agents"; claims="${bus}/claims"; inbox="${bus}/inbox"
+subagents="${bus}/subagents"
 log="${bus}/activity.log"
 sid8="${sid:0:8}"
 curbr="$(branch_of "$cwd")"
@@ -115,13 +122,13 @@ curbr="$(branch_of "$cwd")"
 LEDGER_SH="$(ck_plugin_root)/scripts/ledger.sh"
 
 ensure_dirs() {
-  mkdir -p "$agents" "$claims" "$inbox" 2>/dev/null || return 1
+  mkdir -p "$agents" "$claims" "$inbox" "$subagents" 2>/dev/null || return 1
   [ -f "${bus}/.gitignore" ] || printf '*\n' > "${bus}/.gitignore" 2>/dev/null
   return 0
 }
 
 prune_dead() {
-  local t f last cf owner; t="$(now)"
+  local t f last cf owner sd; t="$(now)"
   for f in "$agents"/*.json; do
     [ -e "$f" ] || continue
     last="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$last" ] && last=0
@@ -135,6 +142,13 @@ prune_dead() {
     [ -e "$cf" ] || continue
     owner="$(jq -r '.sid // ""' "$cf" 2>/dev/null)"
     { [ -z "$owner" ] || ! agent_live "$owner"; } && rm -f "$cf" 2>/dev/null
+  done
+  # And subagent dirs for sessions that crashed mid-call (a live session
+  # cleans up its own via subagent-stop / stop; a dead one never gets to).
+  for sd in "$subagents"/*/; do
+    [ -d "$sd" ] || continue
+    owner="$(basename "$sd")"
+    agent_live "$owner" || rm -rf "$sd" 2>/dev/null
   done
   return 0   # never let the loop's last test short-circuit `... && heartbeat`
 }
@@ -340,6 +354,52 @@ case "$phase" in
     exit 0
     ;;
 
+  # ── PreToolUse Task: record a running subagent + soft same-type heads-up ──
+  # Never denies — subagent launches are never blocked, same as everything
+  # else on this bus. Single-writer file (only this sid ever writes its own
+  # subagents/<sid>/ dir), so tmp+mv is enough — no lock needed, same as
+  # heartbeat().
+  subagent-start)
+    ensure_dirs || exit 0
+    tid="$(printf '%s' "$input" | jq -r '.tool_use_id // empty' 2>/dev/null)"
+    [ -z "$tid" ] && exit 0
+    stype="$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)"
+    sdesc="$(printf '%s' "$input" | jq -r '.tool_input.description // empty' 2>/dev/null)"
+    heartbeat "" ""
+    mkdir -p "${subagents}/${sid}" 2>/dev/null
+    rec="${subagents}/${sid}/${tid}.json"
+    jq -n --arg sid "$sid" --arg tid "$tid" --arg t "$stype" --arg d "$sdesc" --argjson ts "$(now)" \
+      '{sid:$sid, tool_use_id:$tid, subagent_type:$t, description:$d, started_at:$ts}' \
+      > "${rec}.tmp" 2>/dev/null && mv "${rec}.tmp" "$rec" 2>/dev/null
+    [ -n "$stype" ] || exit 0
+    # soft heads-up: is any OTHER live sibling already running this same subagent_type?
+    hit="" hitdesc=""
+    for f in "$subagents"/*/*.json; do
+      [ -e "$f" ] || continue
+      IFS=$'\t' read -r osid ot od <<< "$(jq -r \
+        '[.sid // "", .subagent_type // "", .description // ""] | @tsv' "$f" 2>/dev/null)"
+      [ "$osid" = "$sid" ] && continue
+      [ "$ot" = "$stype" ] || continue
+      agent_live "$osid" || continue
+      hit="${osid:0:8}"; hitdesc="$od"; break
+    done
+    [ -n "$hit" ] || exit 0
+    msg="🤖 Another live coordkit instance (${hit}) is also running a \"${stype}\" subagent"
+    [ -n "$hitdesc" ] && msg+=" (${hitdesc})"
+    msg+=" right now. Not blocking — check /bus before duplicating the work."
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":%s,"additionalContext":%s}}\n' \
+      "$(printf '%s' "$msg" | jq -Rs .)" "$(printf '%s' "$msg" | jq -Rs .)"
+    exit 0
+    ;;
+
+  # ── PostToolUse Task: the subagent finished — drop its running record ─────
+  subagent-stop)
+    tid="$(printf '%s' "$input" | jq -r '.tool_use_id // empty' 2>/dev/null)"
+    [ -n "$tid" ] && rm -f "${subagents}/${sid}/${tid}.json" 2>/dev/null
+    rmdir "${subagents}/${sid}" 2>/dev/null
+    exit 0
+    ;;
+
   # ── SessionEnd ────────────────────────────────────────────────────────────
   # Wired to SessionEnd only (NOT Stop): Stop fires at the end of every
   # assistant turn, which would drop the heartbeat + release claims mid-session
@@ -350,6 +410,9 @@ case "$phase" in
       [ -e "$cf" ] || continue
       [ "$(jq -r '.sid // ""' "$cf" 2>/dev/null)" = "$sid" ] && rm -f "$cf" 2>/dev/null
     done
+    # covers any subagent that was still running when the session ended
+    # (crashed/interrupted before its own PostToolUse/Task could fire)
+    rm -rf "${subagents}/${sid}" 2>/dev/null
     # drop our own inbox dir if drained; rmdir no-ops if it still holds
     # undelivered messages (leaving them for a possible late reader).
     rmdir "${inbox}/${sid}" 2>/dev/null
@@ -499,6 +562,16 @@ case "$phase" in
         [ -n "$cwd" ] && printf '      path:    %s\n' "$cwd"
         printf '      task:    %s\n' "$task"
         [ -n "$files" ] && printf '      %btouched:%b %s\n' "$DIM" "$RST" "$files"
+        if [ -d "${subagents}/${s}" ]; then
+          for sf in "${subagents}/${s}"/*.json; do
+            [ -e "$sf" ] || continue
+            IFS=$'\t' read -r sat sad <<< "$(jq -r \
+              '[.subagent_type // "?", .description // ""] | @tsv' "$sf" 2>/dev/null)"
+            printf '      %bsubagent:%b %s' "$DIM" "$RST" "$sat"
+            [ -n "$sad" ] && printf ' — %s' "$sad"
+            printf '\n'
+          done
+        fi
       done
       [ "$any" = 0 ] && echo "  (none)"
       printf '%bCOLLISIONS%b\n' "$RED" "$RST"

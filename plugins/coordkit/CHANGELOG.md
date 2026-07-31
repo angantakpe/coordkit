@@ -12,12 +12,39 @@ on`), then the package was removed from this marketplace entirely — see below.
 Its historical entries are no longer on disk but remain in git history
 (`git log -- plugins/coordguard/`).
 
-## Unreleased
+`skillkit` used to be a separate plugin in this marketplace; as of 4.0.0 it is
+merged into coordkit the same way coordguard was at 3.0.0. Its historical
+entries are no longer on disk but remain in git history
+(`git log -- plugins/skillkit/`).
+
+## 4.0.0
+
+Merges skillkit into coordkit and adds cross-instance subagent visibility.
+
+### Added
+- **skillkit's skill auto-activation**, absorbed as-is: a second
+  `UserPromptSubmit` hook entry runs `scripts/skill-activation.sh`, matching
+  the prompt against layered `skill-rules.json` files (global
+  `~/.claude/skills` + per-project) and suggesting skills. Suggest-only,
+  same as before — never blocks.
+- **10 specialized agents** (`agents/`), the `/dev-docs` and
+  `/dev-docs-update` context-persistence commands, `/route-research-for-testing`,
+  and the `skill-developer` meta-skill — all moved in from skillkit and now
+  available to every instance with coordkit installed, not just skillkit.
+- **Cross-instance subagent visibility**: new `PreToolUse`/`PostToolUse` hook
+  entries matching the `Task` tool record which subagent (type + description)
+  each live instance is currently running, under
+  `.coordkit-bus/subagents/<sid>/<tool_use_id>.json`. The `/bus` dashboard now
+  shows a SUBAGENTS section per live instance, and launching a subagent whose
+  type another live sibling is already running surfaces a non-blocking
+  heads-up — same warn-only philosophy as the existing file-collision check.
 
 ### Changed
 - Reframed the packaging docs around a host/adapter split: coordkit is now
   documented as a host-neutral coordination core, with the Claude Code
   packaging called out as the current adapter.
+- Bumped to 4.0.0 for the skillkit merge — a packaging change, not a breaking
+  behavior change for either plugin's existing hooks.
 
 ### Removed
 - **The `coordguard` plugin, entirely.** The 2.0.0 tombstone described under
@@ -28,6 +55,12 @@ Its historical entries are no longer on disk but remain in git history
   `/plugin uninstall coordguard@coordkit` to remove it manually. Nothing
   changes for coordkit itself — this is a marketplace-listing cleanup, not a
   coordkit behavior change.
+- **The `skillkit` plugin, entirely.** Its `agents/`, `commands/`, `scripts/`,
+  `skills/`, and `templates/` moved into `plugins/coordkit/`; its own
+  `.claude-plugin/`, `hooks/`, `README.md`, and `CHANGELOG.md` are gone. If
+  you have skillkit installed separately, run
+  `/plugin uninstall skillkit@coordkit` — its functionality now ships as part
+  of coordkit.
 
 ## 3.0.0
 

@@ -20,6 +20,12 @@
             "command": "bash",
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "prompt-submit"],
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/skill-activation.sh"],
+            "timeout": 5
           }
         ]
       }
@@ -47,6 +53,17 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "pretool-task"],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -68,6 +85,17 @@
             "type": "command",
             "command": "bash",
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "posttool-bash"],
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "posttool-task"],
             "timeout": 5
           }
         ]

@@ -3,37 +3,25 @@
 A host-adapter marketplace for same-machine, multi-instance coordination. It
 packages a working coordination core so it becomes installable, shareable, and
 semver-versioned instead of a hand-wired set of host-specific hook scripts.
-This repository currently ships the Claude Code adapter.
-(The repo/marketplace is named `coordkit` after its flagship plugin — see the
-scope note below for why that's an imperfect fit now that it also ships
-`skillkit`.)
+This repository currently ships the Claude Code adapter, as a single plugin
+named `coordkit`.
 
-## Scope note
-
-This repo was renamed from `coordkit-marketplace` to `coordkit` — shorter, but
-it now literally collides with the name of one specific plugin it ships
-(`coordkit`). `skillkit` is bundled here for convenience, but it is
-functionally unrelated: `coordkit` is the entire coordination story, while
-`skillkit` is skill auto-activation and shares no concepts, state, or hooks
-with it. Splitting `skillkit` into its own marketplace is worth doing as more
-unrelated plugins land here. **Flagged, not yet acted on.**
-
-It ships **two plugins**:
+It ships **one plugin**:
 
 | Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **coordkit** | 3.0.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard. Tracks who else is live in a repo and which files they touch and surfaces it so parallel sessions can reconcile instead of stepping on each other — and, where you ask for it, *denies* an edit that would clobber theirs. |
-| **skillkit** | 1.0.2   | **Suggest-only — never blocks**                            | Skill auto-activation. On every prompt it matches layered`skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders into context. Also ships 10 specialized agents, the `/dev-docs` context-persistence commands, and the skill-developer meta-skill. |
+| **coordkit** | 4.0.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard + skill auto-activation. Tracks who else is live in a repo, which files they touch, and which subagents they're running, and surfaces it so parallel sessions can reconcile instead of stepping on each other and duplicating work — and, where you ask for it, *denies* an edit that would clobber theirs. Also matches prompts against layered `skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders, and ships a shared roster of specialized agents and the `/dev-docs` context-persistence commands. |
 
-> **`coordguard` has been removed.** Through 2.x, the hard anti-clobber
-> blocker shipped as a separate `coordguard` package you installed alongside
-> coordkit. As of coordkit **3.0.0** that blocker lives inside coordkit as
-> opt-in [guard mode](#enforcement-modes). `coordguard` shipped one further
-> release as a deprecation tombstone (v2.0.0, no enforcement — just a notice),
-> and has since been deleted from this marketplace and repo entirely. If you
-> still have it installed from before, `/plugin update` won't fix it (the
-> marketplace no longer serves it) — run `/plugin uninstall coordguard@coordkit`
-> manually. See [Install](#install).
+> **`coordguard` and `skillkit` have both been merged in.** Through 2.x, the
+> hard anti-clobber blocker shipped as a separate `coordguard` package. As of
+> coordkit **3.0.0** that blocker lives inside coordkit as opt-in
+> [guard mode](#enforcement-modes); `coordguard` itself has since been deleted
+> from this marketplace and repo entirely. As of **4.0.0**, `skillkit` (skill
+> auto-activation + agents + dev-docs) is merged in the same way. If you still
+> have either installed separately, `/plugin update` won't fix it (the
+> marketplace no longer serves them as separate entries) — run
+> `/plugin uninstall coordguard@coordkit` and/or
+> `/plugin uninstall skillkit@coordkit` manually. See [Install](#install).
 
 ## Documentation
 
@@ -69,8 +57,8 @@ the same core concepts and on-disk coordination state.
 
 ## Enforcement modes
 
-*(This section is about coordkit only — skillkit is a separate concern; see the
-scope note above.)*
+*(This section covers coordkit's bus/guard layers only. Skill auto-activation
+is unrelated and always suggest-only — it's never gated by enforcement mode.)*
 
 coordkit's default contract is unchanged from 2.x: it **observes and reports, it
 never wedges a tool call**. That's what makes it safe to leave installed
@@ -190,17 +178,13 @@ Add the marketplace, then install the plugin(s):
 # ...or from a local clone:
 /plugin marketplace add ./coordkit
 
-# Coordination: always-on awareness, plus the opt-in hard guard.
 /plugin install coordkit@coordkit
-
-# Skill auto-activation + agents + dev-docs:
-/plugin install skillkit@coordkit
 ```
 
-**One plugin covers both halves now.** Installing `coordkit` gives you the
-warn-only bus and ledger immediately; running `/guard on` inside a repo adds the
-hard anti-clobber guard *there*. There is no second plugin to install for full
-functionality.
+**One plugin covers everything now.** Installing `coordkit` gives you the
+warn-only bus, ledger, and skill auto-activation immediately; running `/guard
+on` inside a repo adds the hard anti-clobber guard *there*. There is no second
+plugin to install for full functionality.
 
 > **Distribution reality check.** As currently configured this repo's only
 > remote is **private** (`git@github.com:angantakpe/coordkit.git`),
@@ -212,31 +196,42 @@ functionality.
 > (`/plugin marketplace add ./coordkit`) is the path that works for
 > anyone who has the files.
 
-After installing skillkit, seed your global rules file (see
-`plugins/skillkit/README.md` for the schema):
+To use skill auto-activation, seed your global rules file (the schema is
+documented inline in `plugins/coordkit/scripts/skill-activation.sh`'s header
+comment):
 
 ```bash
 cp <plugin-root>/templates/skill-rules.example.json ~/.claude/skills/skill-rules.json
 ```
 
-### Migrating from 2.x + coordguard
+### Migrating from 2.x + coordguard, or from separate coordkit + skillkit
 
-If you were running the two-plugin setup, uninstall the old blocker and turn
-guard mode on in the repos that relied on it:
+If you were running the pre-3.0.0 two-plugin coordguard setup, uninstall the
+old blocker and turn guard mode on in the repos that relied on it:
 
 ```bash
 /plugin uninstall coordguard@coordkit
 /guard on          # run inside each repo that wants the hard guard
 ```
 
-`coordguard` is no longer listed in this marketplace at all — it briefly shipped
-one further release as a deprecation tombstone (v2.0.0, no enforcement hooks,
-just a one-time notice) before being deleted entirely. `/plugin marketplace
-update` won't remove a pre-existing install for you (the catalog simply no
-longer offers updates for it); the uninstall above is the only way to clear it.
-Running a stale 2.x coordguard *and* coordkit 3.0.0 with guard mode on is the
-case worth actually avoiding — two independent blockers on the same
-`PreToolUse` event keeping two separate fingerprint stores, which mostly buys
+If you had `coordkit` and `skillkit` installed as two separate plugins
+(pre-4.0.0), uninstall skillkit — its functionality now ships as part of
+coordkit, with nothing else to configure:
+
+```bash
+/plugin uninstall skillkit@coordkit
+```
+
+Neither `coordguard` nor `skillkit` is listed in this marketplace as a
+separate entry anymore — `coordguard` briefly shipped one further release as a
+deprecation tombstone (v2.0.0, no enforcement hooks, just a one-time notice)
+before being deleted entirely; `skillkit` was folded straight in at 4.0.0.
+`/plugin marketplace update` won't remove a pre-existing install for you (the
+catalog simply no longer offers updates for it); the uninstalls above are the
+only way to clear them. Running a stale 2.x coordguard *and* coordkit 3.0.0+
+with guard mode on is the case worth actually avoiding — two independent
+blockers on the same `PreToolUse` event keeping two separate fingerprint
+stores, which mostly buys
 you confusing double denies.
 
 ### Scopes
@@ -254,26 +249,33 @@ Updates ship by bumping the plugin `version`; users pull them with
 
 ## What gets wired
 
-**coordkit** registers five lifecycle events across seven hook entries. Every one
-of them invokes the *same* dispatcher —
+**coordkit** registers five lifecycle events across ten hook entries. Nine of
+them invoke the *same* dispatcher —
 `${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh` (via `${CLAUDE_PLUGIN_ROOT}` so the
 install location doesn't matter). `coord.sh` sources `bus.sh`, `ledger.sh`, and
 `guard.sh` as **libraries** and runs their phases in-process, so a hook event
-costs one shell rather than one shell per subsystem:
+costs one shell rather than one shell per subsystem. The tenth entry —
+`skill-activation.sh` on `UserPromptSubmit` — is a separate, stateless script
+(merged in from skillkit at 4.0.0), invoked directly rather than through
+`coord.sh`:
 
-| Event                | Matcher                            | `coord.sh` subcommand | Phases run, in order                                                     |
+| Event                | Matcher                            | Script / `coord.sh` subcommand | Phases run, in order                                                     |
 | -------------------- | ---------------------------------- | ----------------------- | ------------------------------------------------------------------------ |
 | `SessionStart`     | —                                 | `session-start`       | bus `start` → ledger `start`                                       |
 | `UserPromptSubmit` | —                                 | `prompt-submit`       | bus `task` → ledger `prompt`                                       |
+| `UserPromptSubmit` | —                                 | `skill-activation.sh` | matches the prompt against `skill-rules.json`, suggests skills (suggest-only) |
 | `PreToolUse`       | `Write\|Edit\|NotebookEdit`       | `pretool-write`       | guard `check` (**may `deny` — guard mode only**) → bus `check` (warn) |
 | `PreToolUse`       | `Bash`                           | `pretool-bash`        | guard `snapshot` (fingerprint tracked files)                             |
+| `PreToolUse`       | `Task`                           | `pretool-task`        | bus `subagent-start` (record + soft same-type heads-up, never denies)    |
 | `PostToolUse`      | `Write\|Edit\|NotebookEdit\|Read` | `posttool-write`      | bus `record` → guard `record`                                      |
 | `PostToolUse`      | `Bash`                           | `posttool-bash`       | bus `record` → guard `absorb` (re-stamp self-inflicted changes)     |
-| `SessionEnd`       | —                                 | `session-end`         | bus `stop` → guard `cleanup` (end-of-session cleanup)               |
+| `PostToolUse`      | `Task`                           | `posttool-task`       | bus `subagent-stop` (drop the running-subagent record)                   |
+| `SessionEnd`       | —                                 | `session-end`         | bus `stop` (also clears any still-running subagent records) → guard `cleanup` |
 
-`PostToolUse` is two entries rather than 2.x's single
-`Write|Edit|NotebookEdit|Read|Bash` matcher, because Bash needs guard's `absorb`
-while the other tools need its `record`.
+`PostToolUse` is split by matcher rather than one combined
+`Write|Edit|NotebookEdit|Read|Bash|Task` entry, because each tool group needs a
+different phase (Bash needs guard's `absorb`, Task needs `subagent-stop`, the
+rest need `record`).
 
 Guard runs *before* the bus on `pretool-write`, and a deny **short-circuits** —
 `coord.sh` exits without running the bus check at all, since a soft "someone else

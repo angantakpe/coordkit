@@ -13,9 +13,11 @@
 #   prompt-submit    UserPromptSubmit                      bus task   → ledger prompt
 #   pretool-write    PreToolUse  Write|Edit|NotebookEdit   guard check → bus check
 #   pretool-bash     PreToolUse  Bash                      guard snapshot
+#   pretool-task     PreToolUse  Task                      bus subagent-start
 #   posttool-write   PostToolUse Write|Edit|NotebookEdit|Read
 #                                                          bus record → guard record
 #   posttool-bash    PostToolUse Bash                      bus record → guard absorb
+#   posttool-task    PostToolUse Task                      bus subagent-stop
 #   session-end      SessionEnd                            bus stop   → guard cleanup
 #
 # The hook JSON is read from stdin ONCE and replayed to each phase.
@@ -99,6 +101,10 @@ case "$event" in
     guard_snapshot "$input"
     ;;
 
+  pretool-task)
+    bus_run subagent-start <<<"$input"
+    ;;
+
   posttool-write)
     bus_run record <<<"$input"
     guard_record "$input"
@@ -107,6 +113,10 @@ case "$event" in
   posttool-bash)
     bus_run record <<<"$input"
     guard_absorb "$input"
+    ;;
+
+  posttool-task)
+    bus_run subagent-stop <<<"$input"
     ;;
 
   session-end)

@@ -16,8 +16,10 @@ bus's phases; see [§8](#8-the-bus-and-guard-mode) for where guard fits.
 Everything lives under `<repo>/.coordkit-bus/`:
 
 ```
-agents/<sid>.json    heartbeat: {sid, branch, cwd, task, files, last_seen}
-claims/<sha>.json    soft FILE lock: {path, sid, ts} — one per touched file
+agents/<sid>.json           heartbeat: {sid, branch, cwd, task, files, last_seen}
+claims/<sha>.json           soft FILE lock: {path, sid, ts} — one per touched file
+subagents/<sid>/<tid>.json  a subagent this session currently has running:
+                            {sid, tool_use_id, subagent_type, description, started_at}
 inbox/<sid>/*.msg    messages waiting for that instance
 activity.log         feed: "<iso>\t<sid8>\t<verb>\t<detail>"
 ```
@@ -27,6 +29,14 @@ recorded whenever any session Writes/Edits, used only for the collision
 warning below. This is unrelated to the ledger's task-claim/lease concept
 (`docs/LEDGER.md` §2) even though both are called "claim" — the noun is
 overloaded across the codebase, not the same mechanism.
+
+**`subagents/<sid>/` is per-session and ephemeral**, not an audit trail: one
+file per currently-running Task-tool call, written at `PreToolUse`/`Task`
+(`subagent-start`) and removed at `PostToolUse`/`Task` (`subagent-stop`). A
+session's own `subagents/<sid>/` directory is also wiped on `SessionEnd` and
+by `prune_dead()` if the owning heartbeat goes hard-stale, so a crashed
+session can't leave a phantom "still running" record behind. It's what powers
+the SUBAGENTS lines in `/bus` (§7) and the same-type heads-up described there.
 
 ## 2. Heartbeats and liveness
 
@@ -97,7 +107,7 @@ so a solo session sees a clean statusline.
 
 | Slash command | What it calls | Does |
 | --- | --- | --- |
-| `/bus` | `bus.sh dashboard` | One-shot snapshot: live agents, collisions, task board, recent activity |
+| `/bus` | `bus.sh dashboard` | One-shot snapshot: live agents (+ any subagents each is running), collisions, task board, recent activity |
 | `/claim "<desc>"` | `bus.sh claim` | Publish + immediately lease a ledger task |
 | `/tasks` | `bus.sh tasks` | Print the ledger's projected task board |
 | `/msg <target> "<text>"` | `bus.sh msg` | Deliver a message to another live instance |
