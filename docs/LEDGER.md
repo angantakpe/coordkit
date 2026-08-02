@@ -62,12 +62,103 @@ This is the **one** task queue in coordkit — the bus's `/claim`/`/tasks`/
   the append race gets the task.
 - `done <subject>` / `block <subject> "<why>"` — mark terminal states.
 
+**Questions become claimable work.** `ask <subject> "<q>"` doesn't just open a
+question for a human to eventually notice in the digest — it also queues a
+linked task, subject `answer-<subject>`, body `"answer the open question
+'<subject>': <q>"`. That means an idle sibling's `next` can auto-claim "go
+answer this question" like any other task. `answer <subject> "<a>"` closes
+the loop: it marks `answer-<subject>` `done` in the same call, regardless of
+which instance (if any) claimed it — the projection's done/claim
+reconciliation always treats the latest `done` on a subject as authoritative.
+Limitations: this doesn't add task priority/ordering — the linked task queues
+in the normal first-appearance order like any other `task` call. And
+re-`ask`ing an already-answered subject reopens the *question* (a fresh
+`question` event outdates the prior `answer`) but does **not** reopen the
+already-`done` linked task, since a bare `task` event only updates the
+description, not claim/done status — re-answering still works (it appends a
+fresh `done`), but `next` won't resurface it as new work.
+
 **Work-stealing, no leader**: a claim whose lease has expired, *or* whose
 owning session's bus heartbeat has gone dead (`owner_live()`, tied to the
 bus's `STALE_HARD` = 6h), is treated as **open again** the next time anyone
 computes `task_status()`. Nobody has to explicitly release it — the next
 `claim`/`next` call just takes it. This is why the ledger depends on the bus:
 liveness is the bus's job, the ledger only asks it the question.
+
+### Swarm mode — running workers against the queue
+
+Everything above describes the primitives; nothing runs them for you — a
+human calls `/led next` by hand, one task at a time. `cobus swarm <N>`
+(`plugins/coordkit/scripts/swarm.sh`) is that, automated: it spawns `N`
+worker loops that each repeatedly call `next`, "execute" whatever they claim,
+and report the outcome back to the ledger, until the queue looks drained (a
+handful of consecutive empty polls, each backed off 2-5s — no hot-looping) or
+the process is interrupted.
+
+**`N` is capped at 8, hard.** This isn't configurable in the current pass —
+it's a deliberate safety ceiling against a fat-fingered `cobus swarm 500`
+forking hundreds of processes.
+
+**Bare-CLI liveness.** `owner_live()` (above) needs a live bus heartbeat for
+the claiming sid, which the SessionStart/UserPromptSubmit hooks normally
+supply for free — but a swarm worker is a bare shell loop with no hook driving
+it. `bus.sh` gained a small `heartbeat` CLI phase for exactly this: each
+worker mints itself a distinct session id (`swarm<N>-<pid>`) and registers one
+heartbeat before it starts polling. The bus's liveness window (6h) comfortably
+outlasts any reasonable swarm run, so there's nothing to refresh per-poll.
+
+**Machine-readable `next`.** `next` also gained a `--quiet`/`-q` flag, purely
+additive — no flag is byte-identical to the original decorated output. With
+the flag: a successful claim prints exactly one line, `<subject>\t<description>`,
+and exits 0; nothing claimable prints nothing and exits 1. Workers use this
+instead of string-matching the human-readable "🤖 picked next task..." /
+"🟢 no open tasks..." messages, which would otherwise be one decoration change
+away from silently breaking every worker.
+
+**Claim races on cold start.** `next` has no coordination beyond the log
+itself — "whichever instance's call wins the append race gets the task," and
+under the ledger's last-write-wins convergence, the LAST claim event for a
+subject is the one that counts. With N workers all polling in lockstep, this
+race is far more likely to trigger than with occasional human `/led next`
+calls: testing this feature reliably reproduced two workers both claiming the
+same task on their very first poll when the queue had exactly as many open
+tasks as workers. Each worker's first poll is now staggered by its id
+(whole seconds — `sleep 0.N` isn't portable to BSD/macOS `sleep(1)`), which
+eliminated the collision in testing, but it's a mitigation, not a guarantee:
+under heavy contention two workers can still occasionally claim the same
+subject, and in EXEC mode (below) that means the task's command could run
+twice. This is the same class of risk the ledger already accepts for two
+concurrent humans racing `next` — swarm just makes it easier to trigger, not
+new in kind.
+
+**Execution is deliberately conservative.** By default, `cobus swarm` runs in
+**DRY RUN**: each worker still calls the real `next` (so dependency ordering
+and the work-stealing/lease mechanics are exercised for real, not simulated),
+prints what task it claimed and what command *would* run, and then — this is
+the one non-obvious design choice — **does NOT call `done`**. The claim is
+left in place and self-expires via the normal lease TTL if nothing completes
+it for real. The alternative (auto-`done`ing a dry run) was rejected: a
+`done` event is a permanent, trusted assertion every other instance reads as
+ground truth, and there is no "undone" verb to walk it back if a dry run
+silently marked real work complete. A stale claim, by contrast, is exactly
+the case leases already exist to self-heal — bounded, reversible, and costs
+nothing new.
+
+Real execution requires **both** `COORDKIT_SWARM_EXEC=1` *and*
+`COORDKIT_SWARM_CMD` (a shell command template; the literal text `{desc}` is
+replaced with the claimed task's description, then the whole string is handed
+to `bash -c`). On success the worker calls `done`; on a nonzero exit it calls
+`block <subject> "...command exited N"` instead of silently marking broken
+work complete. Nothing here ever adds a "skip permissions" flag to whatever
+command you configure — if `COORDKIT_SWARM_CMD` is something like
+`claude -p "{desc}"`, you get normal prompted permissions unless *you*
+configure otherwise, and you're responsible for that choice either way. Since
+the description is spliced into a real shell command line, a description
+containing shell metacharacters will be interpreted by the shell — the same
+trust boundary already applies to whoever can write `task` events into this
+queue in the first place (same machine, or an explicitly `cobus trust`-ed
+git-mode repo), but don't point `COORDKIT_SWARM_CMD` at anything you wouldn't
+run with arbitrary task-description text as input.
 
 ## 3. Pagination — what actually reaches your context
 
@@ -168,18 +259,51 @@ digest | catchup      full paginated digest
 board                 the projected task queue
 note "<text>"         drop a durable note
 decide <subj> "<t>"   record a decision (latest per subject wins)
-ask <subj> "<q>"      open a question
-answer <subj> "<a>"   close it
+ask <subj> "<q>"      open a question (also queues task answer-<subj>)
+answer <subj> "<a>"   close it (also marks answer-<subj> done)
 task "<desc>"         queue work (dep:<subject> tokens for ordering)
 claim <subj>          lease a task
-next                  auto-claim the first open, deps-satisfied task
+next [--quiet|-q]     auto-claim the first open, deps-satisfied task
+                      (--quiet: "<subject>\t<desc>" + exit 0, or exit 1 with
+                      no output when nothing's claimable — for scripts, not
+                      humans; see cobus swarm below)
 done <subj>           mark complete
 block <subj> "<why>"  mark blocked
 trust | distrust      allow/revoke this repo's coord.toml-driven sharing
 compact               snapshot projections, bump the schema compaction epoch
+                      (see §7 — SessionStart now auto-queues this as a task)
 ```
 
-## 7. One task queue, two front-ends
+## 7. Compaction — snapshot, and now self-scheduling
+
+`compact` (§6) is purely additive: it never truncates or edits
+`ledger.jsonl`, it materializes the current projections (open/claimed/done/
+blocked tasks, latest decision per subject, open questions, `max_seq`) into
+`.coordkit-bus/compacted-<epoch>.json` and bumps `compaction_epoch` in
+`schema/MANIFEST.json`. That command existed long before anything called it —
+it was 100% manual, so in practice it never ran and every digest kept
+re-scanning an ever-growing log.
+
+`SessionStart` now checks this itself: it compares the current `max_seq()`
+against the `max_seq` recorded in the most recent `compacted-*.json` for
+*this* repo's bus, and once that drift exceeds `COMPACT_EVERY` (200 events,
+tunable at the top of `ledger_main`), queues a `compact-ledger-<seq>` task —
+the same task queue as everything else, claimable via `/led claim` or `/led
+next`, whose body just tells whoever picks it up to run `cobus compact`. The
+subject is suffixed with the triggering seq rather than a fixed
+`compact-ledger`, because task-status reconciliation only ever compares
+`done`/`claim`/`block` seqs against each other, never against a `task`
+event's own seq — a fixed subject would go permanently invisible on the
+board after its first done/compact cycle, defeating "self-scheduling". The
+check only runs on `SessionStart` (not on every `UserPromptSubmit`): that
+phase already pays for one full-log projection scan to build its own digest,
+so this reuses that same cache for free, whereas `UserPromptSubmit` normally
+does a much cheaper cursor-delta-only read and doesn't otherwise need to scan
+the whole log — the threshold is coarse enough that a once-per-session-start
+cadence is plenty. Nothing about `compact` itself changed: the log is still
+never rewritten, and running `compact` any number of times stays safe.
+
+## 8. One task queue, two front-ends
 
 This used to be two unrelated systems: the bus had its own simple markdown
 board (`TASKS.md`, checkbox lines, literal-text `done` matching, no leases or

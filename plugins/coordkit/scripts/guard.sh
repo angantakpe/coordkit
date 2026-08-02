@@ -28,10 +28,22 @@
 #   guard_snapshot "$hook_json" # PreToolUse  Bash
 #   guard_absorb   "$hook_json" # PostToolUse Bash
 #   guard_cleanup  "$hook_json" # SessionEnd
+#   guard_driftreport "$hook_json" # UserPromptSubmit — ALWAYS ON (see below)
 #
 # Usage — as a CLI (hook JSON on stdin, same phase names):
-#   guard.sh check|record|snapshot|absorb|cleanup
+#   guard.sh check|record|snapshot|absorb|cleanup|driftreport
 #   guard.sh on | off | status        # read/write the enforcement mode
+#
+# ── guard_driftreport: read-set drift warning, not gated by enforcement mode ──
+# Every other deny/warn phase above only matters in "guard" mode. This one is
+# pure information and fires in "warn" mode too (coordkit's default): it tells
+# the model which files it already Read/Write/Edit'd THIS session have since
+# changed on disk — a sibling instance edited them, a `git pull` landed, an
+# editor outside Claude touched them — so it stops silently reasoning from
+# stale content until it happens to re-Read. Never denies, never mutates guard
+# state (no guard_record call in here): a stored fingerprint only advances
+# through the normal posttool-write -> guard_record path, so re-Reading a
+# drifted file is what naturally stops it being mentioned next turn.
 #
 # BASH BRACKETING — a hook can't know which files an arbitrary shell command
 # touched (sed -i, formatters, git checkout, …), so files this session modified
@@ -154,6 +166,130 @@ _guard_file() {
 }
 
 # --------------------------------------------------------------------------- #
+# Best-effort attribution for the deny reason — WHO likely changed the file,
+# not just THAT it changed. String-content enrichment only: nothing here
+# alters guard_check's gate, its fingerprint comparison, or its return codes,
+# and every lookup below fails silently (empty output) so a broken/missing
+# signal degrades to today's plain generic reason rather than a broken one.
+#
+# Resolves the SAME .coordkit-bus/ bus.sh and ledger.sh would for this hook
+# event (common.sh's resolve_root(), the one canonical rule). Doesn't call
+# into bus.sh/ledger.sh's own agent_live()/owner_live(): both are defined
+# INSIDE bus_main()/ledger_main(), the phase-dispatch functions those files
+# only expose externally via *_run() — which runs the phase in a SUBSHELL
+# (see each file's header), so a function it defines never survives back out
+# to us, and calling bus_main/ledger_main directly risks one of their many
+# internal `exit 0`s killing this hook process outright instead of returning.
+# The TTL below is therefore a value copy, not a call — keep it equal to
+# bus.sh's STALE_HARD / ledger.sh's LIVE_TTL (both 21600s = 6h) if either
+# changes.
+# --------------------------------------------------------------------------- #
+_GUARD_LIVE_TTL=21600
+
+# Same cwd → root resolution bus.sh/ledger.sh use for every hook phase.
+_guard_repo_root() {  # <hook_json>
+  local input="${1:-}" cwd
+  cwd="$(printf '%s' "$input" | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null)"
+  [ -n "$cwd" ] || cwd="$PWD"
+  resolve_root "$cwd"
+}
+
+# THIS session's raw session_id, matching how agents/<sid>.json and
+# claims/<sha>.json store `.sid` — deliberately NOT _guard_sid() above, which
+# sanitizes for use as an rm -rf path component; here it's only ever compared
+# against JSON field values, read-only.
+_guard_raw_sid() {
+  printf '%s' "${1:-}" | jq -r '.session_id // "nosession"' 2>/dev/null
+}
+
+# Field separator for the sid/branch/task rows below. NOT tab: tab is one of
+# bash's IFS *whitespace* characters, so `IFS=$'\t' read` silently COLLAPSES a
+# run of them — an empty branch or task field would merge into its neighbor
+# and shift every field after it. \x1f (ASCII unit separator) doesn't get that
+# whitespace treatment, so empty fields survive `read` intact — the exact
+# problem ledger.sh's own `US=$'\x1f'` projection separator documents and
+# works around; same fix, applied here.
+_GUARD_FS=$'\x1f'
+
+# First LIVE agent (excluding $3) whose heartbeat's `files` list contains $2
+# (a bus-root-relative path — bus.sh's `record` phase stores files that way,
+# via `rel="${file#$root/}"`). Prints "sid8<FS>branch<FS>task" on a hit.
+_guard_who_has_file() {  # <agents_dir> <relpath> <exclude_sid>
+  local agents="$1" relpath="$2" exclude="$3" f s last br task hit t
+  [ -d "$agents" ] || return 0
+  t="$(date +%s)"
+  for f in "$agents"/*.json; do
+    [ -e "$f" ] || continue
+    IFS="$_GUARD_FS" read -r s last br task hit <<< "$(jq -r --arg p "$relpath" '
+        [ (.sid // ""), ((.last_seen // 0) | tostring), (.branch // "?"),
+          (.task // ""), ((((.files // []) | index($p)) != null) | tostring) ]
+        | join("")
+      ' "$f" 2>/dev/null)"
+    { [ -z "$s" ] || [ "$s" = "$exclude" ]; } && continue
+    [ "$hit" = "true" ] || continue
+    case "$last" in ''|*[!0-9]*) last=0 ;; esac
+    [ $(( t - last )) -le "$_GUARD_LIVE_TTL" ] || continue
+    printf '%s\x1f%s\x1f%s\n' "${s:0:8}" "$br" "$task"
+    return 0
+  done
+  return 0
+}
+
+# The claims/<key>.json soft file-lock. bus.sh's hashkey() uses the SAME
+# sha1sum→shasum→md5sum→md5→sanitized-path fallback chain, on the SAME raw
+# tool_input.file_path string, as _guard_hashkey() above — confirmed by
+# reading bus.sh directly, not assumed, so the caller's own $key is reused
+# here rather than re-hashed. Prints "sid8<FS>branch<FS>age_seconds" on a
+# hit (excluding $3), whether or not that session is still live — a claim is
+# a weaker, history-only signal (see docs/BUS.md §1), so this is deliberately
+# a lower-priority fallback behind _guard_who_has_file above, not another
+# liveness check.
+_guard_who_claimed() {  # <bus_dir> <key> <exclude_sid>
+  local bus="$1" key="$2" exclude="$3" cf s ts br t
+  cf="${bus}/claims/${key}.json"
+  [ -f "$cf" ] || return 0
+  s="$(jq -r '.sid // empty' "$cf" 2>/dev/null)"
+  { [ -z "$s" ] || [ "$s" = "$exclude" ]; } && return 0
+  ts="$(jq -r '.ts // 0' "$cf" 2>/dev/null)"
+  case "$ts" in ''|*[!0-9]*) ts=0 ;; esac
+  br="$(jq -r '.branch // empty' "${bus}/agents/${s}.json" 2>/dev/null)"
+  t="$(date +%s)"
+  printf '%s\x1f%s\x1f%s\n' "${s:0:8}" "$br" "$(( t - ts ))"
+  return 0
+}
+
+# Composes the attribution sentence to append to a deny reason, or "" if
+# neither signal found anything. $3 (key) is optional — pass the caller's
+# already-computed _guard_hashkey result to avoid re-hashing; empty computes
+# it fresh.
+_guard_attribution() {  # <hook_json> <abs_file> [key]
+  local input="$1" file="$2" key="${3:-}" root busdir relpath mysid
+  local sid8 br task age subj
+  root="$(_guard_repo_root "$input")"
+  busdir="${root}/.coordkit-bus"
+  [ -d "$busdir" ] || return 0
+  relpath="${file#"$root"/}"
+  mysid="$(_guard_raw_sid "$input")"
+  subj="$(slug "$relpath")"
+
+  IFS="$_GUARD_FS" read -r sid8 br task <<< "$(_guard_who_has_file "${busdir}/agents" "$relpath" "$mysid")"
+  if [ -n "$sid8" ]; then
+    printf ' Session %s (branch: %s%s) is the likely source — try /msg %s "..." or /led ask %s "..." to coordinate.' \
+      "$sid8" "${br:-?}" "${task:+, working on: '${task}'}" "$sid8" "$subj"
+    return 0
+  fi
+
+  [ -n "$key" ] || key="$(_guard_hashkey "$file")"
+  IFS="$_GUARD_FS" read -r sid8 br age <<< "$(_guard_who_claimed "$busdir" "$key" "$mysid")"
+  if [ -n "$sid8" ]; then
+    printf ' Session %s'"'"'s file-lock claim on this file is the most recent%s, ~%ss ago — try /msg %s "..." or /led ask %s "..." to coordinate.' \
+      "$sid8" "${br:+ (branch: $br)}" "${age:-?}" "$sid8" "$subj"
+    return 0
+  fi
+  return 0
+}
+
+# --------------------------------------------------------------------------- #
 # Phases
 # --------------------------------------------------------------------------- #
 
@@ -189,10 +325,10 @@ guard_check() {
         [ -n "$cur_sec" ] && [ "$cur_sec" = "$seen" ] && return 0
         ;;
     esac
-    reason="⚠️ Concurrency guard: \"${file}\" changed on disk since you last read it — another coordkit instance likely edited it. (Changes made by this session's own Bash commands are normally auto-absorbed; if this was one, the file was already stale before that command ran.) Re-Read the file, reconcile your change with what's now there, then retry. (If you're certain you want to override, tell the user.)"
+    reason="⚠️ Concurrency guard: \"${file}\" changed on disk since you last read it — another coordkit instance likely edited it.$(_guard_attribution "$input" "$file" "$key") (Changes made by this session's own Bash commands are normally auto-absorbed; if this was one, the file was already stale before that command ran.) Re-Read the file, reconcile your change with what's now there, then retry. (If you're certain you want to override, tell the user.)"
   else
     # File exists but this session never Read or wrote it.
-    reason="⚠️ Concurrency guard: \"${file}\" exists on disk but this session hasn't Read it — it may belong to another coordkit instance running in this repo, or was created by a shell command (a hook can't tell which files a Bash call creates). Read it first to see its current contents, then decide whether to edit/overwrite."
+    reason="⚠️ Concurrency guard: \"${file}\" exists on disk but this session hasn't Read it — it may belong to another coordkit instance running in this repo, or was created by a shell command (a hook can't tell which files a Bash call creates).$(_guard_attribution "$input" "$file" "$key") Read it first to see its current contents, then decide whether to edit/overwrite."
   fi
 
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
@@ -294,6 +430,87 @@ guard_cleanup() {
     *) return 0 ;;
   esac
   [ -d "$target" ] && rm -rf "$target" 2>/dev/null
+  return 0
+}
+
+# _guard_drift_who <root> <mysid> <abs_path> — best-effort attribution: is a
+# LIVE sibling session (not this one) the likely author of the drift? Scans
+# bus.sh's own heartbeats (<root>/.coordkit-bus/agents/<sid>.json —
+# {sid,last_seen,files[],task}, see bus.sh's heartbeat()) for one whose `files`
+# list — paths it has Write/Edit/NotebookEdit'd, relative to root, NOT
+# read-only Reads — contains this path. Prints "sid8" or "sid8 (task)" on a
+# hit, nothing on a miss; guard.sh doesn't source bus.sh (its heartbeat/
+# agent_live helpers are private to bus_main()), so this re-reads the same
+# on-disk heartbeat file directly rather than duplicating bus.sh's logic.
+# 21600 mirrors bus.sh's STALE_HARD / ledger.sh's LIVE_TTL — the same
+# "is this session still around" cutoff used everywhere else in coordkit.
+# Read-only: never touches the bus. Always returns 0.
+_guard_drift_who() {
+  local root="$1" mysid="$2" path="$3" agents_dir rel af osid last age hit task t
+  agents_dir="${root}/.coordkit-bus/agents"
+  [ -d "$agents_dir" ] || return 0
+  rel="${path#"$root"/}"
+  t="$(date +%s)"
+  for af in "$agents_dir"/*.json; do
+    [ -f "$af" ] || continue
+    osid="$(jq -r '.sid // empty' "$af" 2>/dev/null)"
+    [ -n "$osid" ] && [ "$osid" != "$mysid" ] || continue
+    last="$(jq -r '.last_seen // 0' "$af" 2>/dev/null)"
+    case "$last" in ''|*[!0-9]*) last=0 ;; esac
+    age=$(( t - last ))
+    [ "$age" -le 21600 ] || continue
+    hit="$(jq -r --arg f "$rel" '(.files // []) | any(. == $f)' "$af" 2>/dev/null)"
+    [ "$hit" = "true" ] || continue
+    task="$(jq -r '.task // empty' "$af" 2>/dev/null)"
+    if [ -n "$task" ]; then printf '%s (%s)' "${osid:0:8}" "$task"; else printf '%s' "${osid:0:8}"; fi
+    return 0
+  done
+  return 0
+}
+
+# guard_driftreport <hook_json> — see the header note above. ALWAYS runs,
+# regardless of ck_enforcement_mode(); prints hook-output JSON only when at
+# least one tracked file has drifted, nothing otherwise. Always returns 0.
+guard_driftreport() {
+  local input="${1:-}" statedir rec path seen cur
+  local -a drifted=()
+  statedir="$(_guard_statedir "$input")"
+  [ -d "$statedir" ] || return 0   # fresh session (or nothing Read/written yet) — nothing to report
+
+  for rec in "$statedir"/*; do
+    [ -f "$rec" ] || continue
+    path="$(sed -n '2p' "$rec" 2>/dev/null)"
+    [ -n "$path" ] || continue      # old-format record (no path line) — nothing to compare
+    seen="$(head -n1 "$rec" 2>/dev/null)"
+    cur="$(_guard_fingerprint "$path")"
+    [ -n "$cur" ] && [ "$cur" = "$seen" ] && continue   # unchanged since we last saw it (also true if the file vanished AND we somehow stored an empty fingerprint, which guard_record never does)
+    drifted+=("$path")
+  done
+  [ "${#drifted[@]}" -gt 0 ] || return 0
+
+  local cwd root mysid
+  cwd="$(printf '%s' "$input" | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null)"
+  [ -n "$cwd" ] || cwd="$PWD"
+  root="$(resolve_root "$cwd")"
+  mysid="$(_guard_sid "$input")"
+
+  # Cap the list so the report stays small; attribution is only computed for
+  # the shown subset, not the full (possibly larger) drifted set.
+  local cap=6 shown=0 total="${#drifted[@]}" list="" entry who base p
+  for p in "${drifted[@]}"; do
+    [ "$shown" -lt "$cap" ] || break
+    base="${p##*/}"
+    who="$(_guard_drift_who "$root" "$mysid" "$p")"
+    if [ -n "$who" ]; then entry="${base} (by ${who})"; else entry="$base"; fi
+    [ -n "$list" ] && list+=", "
+    list+="$entry"
+    shown=$(( shown + 1 ))
+  done
+  [ "$total" -gt "$cap" ] && list+=", +$(( total - cap )) more"
+
+  local msg="⚠️ ${total} file(s) you've read changed on disk since: ${list} — re-Read before trusting their contents."
+  printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%s}}\n' \
+    "$(printf '%s' "$msg" | jq -Rs .)"
   return 0
 }
 
@@ -422,12 +639,13 @@ _guard_cli() {
   esac
   input="$(cat)"
   case "$phase" in
-    check)    guard_check    "$input" ;;
-    record)   guard_record   "$input" ;;
-    snapshot) guard_snapshot "$input" ;;
-    absorb)   guard_absorb   "$input" ;;
-    cleanup)  guard_cleanup  "$input" ;;
-    *)        : ;;
+    check)       guard_check       "$input" ;;
+    record)      guard_record      "$input" ;;
+    snapshot)    guard_snapshot    "$input" ;;
+    absorb)      guard_absorb      "$input" ;;
+    cleanup)     guard_cleanup     "$input" ;;
+    driftreport) guard_driftreport "$input" ;;
+    *)           : ;;
   esac
   # Always exit 0, including on a deny: the deny is carried by the JSON on
   # stdout, never by an exit status.

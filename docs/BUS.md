@@ -112,10 +112,12 @@ so a solo session sees a clean statusline.
 | `/tasks` | `bus.sh tasks` | Print the ledger's projected task board |
 | `/msg <target> "<text>"` | `bus.sh msg` | Deliver a message to another live instance |
 
+| `/fleet` | `bus.sh fleet` | Cross-repo view: which OTHER repos on this machine have live coordkit sessions right now — see §9 |
+
 Run outside a slash command: `cbus` (alias for `bus.sh watch`, a
-2s-refresh full-screen monitor meant for a spare terminal pane) and `cobus gc`
+2s-refresh full-screen monitor meant for a spare terminal pane), `cobus gc`
 (lifecycle cleanup — dead agents/claims/cursors, log rotation; dry-run by
-default, see its own `--help`).
+default, see its own `--help`), and `cobus fleet` (same as `/fleet`).
 
 ## 8. The bus and guard mode
 
@@ -145,3 +147,86 @@ claimed what, it catches cases the bus can't (a sibling that already exited, a
 rebase, an editor outside Claude) — and conversely the bus warns about a *live*
 sibling working in the same file even when neither of you has written to it yet.
 Neither subsumes the other, which is why both still run.
+
+### Read-set drift warning
+
+One more piece of guard.sh is **not** gated by enforcement mode at all:
+`guard_driftreport`, wired into `UserPromptSubmit`. On every turn it re-stats
+every file this session has Read or Write/Edit'd and, if any of them changed on
+disk since, injects a short warning — "you've read this, it's since changed,
+re-Read before trusting it." It fires in `warn` mode (coordkit's default) too,
+because the problem it solves — the model confidently reasoning from content
+that's gone stale underneath it — exists regardless of whether guard mode is
+armed to deny anything about it.
+
+It's read-only: it never mutates a stored fingerprint (that still only happens
+via the normal `posttool-write` → `guard_record` path), so re-Reading a drifted
+file is what naturally drops it off the next report — no separate bookkeeping.
+Attribution is best-effort: it checks whether a *live* sibling's bus heartbeat
+(`agents/<sid>.json`, same file the bus itself reads) shows that session having
+written the drifted path, and names it (sid8 + task) if so; otherwise the file
+is reported with no guessed author.
+
+### Guard deny attribution
+
+A guard deny's message also carries **best-effort attribution** when the bus
+has a signal for it: it checks (1) `agents/<sid>.json` for a live sibling whose
+recently-touched `files` include the target, giving sid8 + branch + task, then
+falls back to (2) a `claims/<sha>.json` file-lock naming who last touched it
+(sid8 only, no liveness requirement — a weaker, history-only signal). Either
+hit appends a concrete "likely changed by / try `/msg`" suggestion to the deny
+reason; if neither finds anything, the message is exactly the plain generic
+one it's always been. Purely informational — it never changes whether the
+call is denied, only what the reason says.
+
+## 9. Cross-repo fleet view
+
+Everything above is scoped to ONE repo's `.coordkit-bus/`. The fleet view is
+the one exception: a small, **read-only discovery** layer that answers "which
+OTHER repos on this machine currently have live coordkit sessions?" — useful
+when you work across many separate repos and want to check from any one of
+them whether you left a session running somewhere else.
+
+**This is explicitly NOT cross-repo task dispatch.** A PM session in repo A
+cannot create a task that lands in repo B's ledger/queue through this
+mechanism, and nothing here attempts that. Routing work across repos raises
+a materially bigger question — whose enforcement/trust settings apply, what
+happens if the target repo doesn't exist locally, how does a foreign task
+get signed — and is deliberately left as future work, not attempted here.
+
+**Registry.** `$(ck_data_dir)/fleet.json` (the same persistent, per-machine,
+per-user directory that already holds `site.json`/`trust.json`/`clock.state`
+— see `common.sh`'s `ck_data_dir()`) holds a flat map of repo root ->
+`{last_seen}`:
+
+```json
+{"repos": {"/path/to/repo-a": {"last_seen": 1735689600},
+           "/path/to/repo-b": {"last_seen": 1735689500}}}
+```
+
+**Registration.** `bus.sh`'s `heartbeat()` — already called on every
+SessionStart/UserPromptSubmit/tool-use — upserts THIS repo's own entry
+(`resolve_root()`'s path) at the end of every call, so there is no second,
+separate write path. Because heartbeat() itself is far too hot a cadence for
+a file shared across every repo on the machine, the fleet write is
+independently throttled to once per `TICK_MIN` (10s) per repo via a small
+per-repo marker file (`.coordkit-bus/.fleet-tick`), the same debounce idiom
+`bus.sh` already uses for desktop-notification debouncing.
+
+**View.** `/fleet` (`bus.sh fleet`, or `cobus fleet` from a plain shell)
+reads the registry and, for each entry, **re-derives** live/idle session
+counts and the branches in use at view time by reading that repo's own
+`.coordkit-bus/agents/*.json` directly — using the same `STALE_SOFT`/
+`STALE_HARD` age thresholds §2 describes. The registry only remembers WHERE
+repos are; it never caches a liveness count, because a cached count would go
+stale between heartbeats. A registry entry whose path no longer exists on
+disk (a moved or deleted repo) is skipped from the listing and pruned from
+`fleet.json`, so a stale entry doesn't linger forever.
+
+**Privacy — strictly local.** `fleet.json` lists local filesystem paths of
+your OTHER repos. It is written only via `ck_data_dir()` (per-machine,
+per-user) and MUST NEVER be routed through the git/relay ledger transport
+(`transports/git.sh`, `transports/relay.sh`) or any other sharing mechanism —
+unlike the ledger, which a `coord.toml` can opt into sharing across machines,
+the fleet registry has no such opt-in and never leaves the machine it was
+written on.

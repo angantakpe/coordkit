@@ -35,6 +35,9 @@ cobus — coordkit shared-context ledger CLI
 Usage: cobus <verb> [args...]
 
 Verbs:
+  fleet                       cross-repo view: which OTHER repos have live
+                              coordkit sessions right now (local-only, never
+                              shared — see docs/BUS.md §9)
   board                       show the projected task queue
   digest | catchup            full shared-context digest
   note "<text>"               drop a durable note for all instances
@@ -55,6 +58,11 @@ Setup / transport:
                               agents/claims/cursors, oversized activity.log).
                               Dry-run by default; --apply to delete. Add
                               --nuke --yes-i-am-sure to remove the bus entirely.
+  swarm <N>                   spawn N (1-8) worker loops draining the task
+                              queue via next/done/block. Dry-run by default;
+                              COORDKIT_SWARM_EXEC=1 + COORDKIT_SWARM_CMD opts
+                              into really executing tasks. `cobus swarm --help`
+                              for the full contract.
 EOF
 }
 
@@ -68,6 +76,8 @@ case "${1:-}" in
   sync)     shift; exec bash "${ROOT}/bin/sync.sh" "$@" ;;
   migrate)  shift; exec bash "${ROOT}/scripts/migrate.sh" "$@" ;;
   gc)       shift; exec bash "${ROOT}/scripts/gc.sh" "$@" ;;
+  fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;
+  swarm)    shift; exec bash "${ROOT}/scripts/swarm.sh" "$@" ;;
 esac
 
 if [ ! -x "$LEDGER" ]; then

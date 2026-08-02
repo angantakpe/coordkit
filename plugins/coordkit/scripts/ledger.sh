@@ -71,6 +71,7 @@ LEASE_TTL=900        # 15 min task lease (matches bus STALE_SOFT)
 LIVE_TTL=21600       # 6 h  -> owner considered dead (matches bus STALE_HARD)
 PAGE=20              # max events injected per turn
 BODYCAP=240          # max chars of an event body in the digest
+COMPACT_EVERY=200    # queue compact-ledger once max_seq drifts this far past the last compaction
 US=$'\x1f'           # projection field separator: NOT IFS-whitespace, so
                      # empty fields survive `read` instead of collapsing
 
@@ -444,6 +445,57 @@ proj_row() {
 # echo the status of a task subject: done | blocked | claimed:<sid8> | open
 task_status() { proj_row "$1" >/dev/null 2>&1 || :; printf '%s\n' "$ROW_ST"; }
 
+# ── self-scheduling compaction ───────────────────────────────────────────────
+# `compact` (below) is safe and cheap but 100% manual today, so in practice it
+# never runs and every digest keeps re-scanning an unbounded log. This queues a
+# `compact-ledger-<seq>` task once the log has drifted far enough past the last
+# snapshot — purely additive, it only ever appends a `task` event.
+
+# Highest-epoch compacted-<N>.json under THIS repo's bus (max_seq, 0 if none).
+# The epoch counter itself lives in the plugin-wide schema/MANIFEST.json (not
+# per-repo), so the highest epoch PRESENT IN THIS BUS DIR is what identifies
+# this repo's latest snapshot — reading the manifest directly could point at a
+# snapshot some other repo using the same plugin install wrote.
+_ck_compact_watermark() {
+  local f best="" beste=-1 e wmx
+  for f in "${bus}"/compacted-*.json; do
+    [ -e "$f" ] || continue
+    e="${f##*/compacted-}"; e="${e%.json}"
+    case "$e" in ''|*[!0-9]*) continue ;; esac
+    [ "$e" -gt "$beste" ] || continue
+    beste="$e"; best="$f"
+  done
+  [ -n "$best" ] || { echo 0; return; }
+  wmx="$(jq -r '.max_seq // 0' "$best" 2>/dev/null)"
+  case "$wmx" in ''|*[!0-9]*) wmx=0 ;; esac
+  printf '%s' "$wmx"
+}
+
+# $1 = current max_seq. The task subject is suffixed with the seq that
+# triggered it (compact-ledger-<mx>), not a fixed "compact-ledger": status
+# reconciliation (_row_status above) only ever compares done/claim/block seqs
+# against each other, never against the task event's own seq, so re-appending
+# a `task` event to an already-done subject does NOT revive it to "open" — a
+# fixed subject would make every crossing after the first invisible on the
+# board. A fresh subject per occurrence keeps each compaction request visible
+# and actionable. "Already pending" is therefore checked by scanning for any
+# compact-ledger-* subject still open or claimed, not by an exact-subject
+# task_status() lookup.
+maybe_schedule_compaction() {
+  local mx="$1" wm delta s st desc
+  wm="$(_ck_compact_watermark)"
+  delta=$(( mx - wm ))
+  [ "$delta" -ge "$COMPACT_EVERY" ] || return 0
+  while IFS=$'\x1f' read -r s st desc; do
+    case "$s" in
+      compact-ledger-*) case "$st" in open|claimed:*) return 0 ;; esac ;;
+    esac
+  done < <(task_rows)
+  append_event task "compact-ledger-${mx}" \
+    "Run \`cobus compact\` to snapshot ledger projections (append-only log is untouched — this just materializes a snapshot). Mark this task done once run." \
+    >/dev/null
+}
+
 # deps satisfied? a task body may carry "dep:subjectA dep:subjectB".
 # Token scan is pure bash: the old grep|sed pipeline forked twice per task, and
 # print_board/build_digest call this once per task on every hook invocation.
@@ -649,6 +701,14 @@ case "$phase" in
       inject "🧠 SHARED CONTEXT (.coordkit-bus/ledger — what every instance knows):"$'\n'"$dg"$'\n'"(write to it: /led note|decide|task|claim|done · take work: /led next · full view: /ctx)" "SessionStart"
     fi
     set_cursor "$mx"
+    # Once per session, not per prompt: build_digest above already paid for
+    # ensure_proj's one full-log scan, so this reuses that cache for free.
+    # UserPromptSubmit deliberately does NOT call this — it doesn't otherwise
+    # scan the whole log, and the threshold is coarse enough that a per-session
+    # cadence is plenty (across concurrently-running instances per
+    # CONCURRENCY.md, some session is starting often; worst case the ledger
+    # just keeps growing a bit longer, same as today's fully-manual baseline).
+    maybe_schedule_compaction "$mx"
     exit 0 ;;
 
   # ── UserPromptSubmit: inject only what's new since the cursor, then advance ─
@@ -756,11 +816,27 @@ case "$phase" in
   ask)
     shift; subj="$(slug "${1:-}")"; shift || true; text="$*"
     { [ -z "$subj" ] || [ -z "$text" ]; } && { echo "usage: ... ask <subject> \"<question>\""; exit 0; }
-    s="$(append_event question "$subj" "$text")"; echo "❓ question on '${subj}' posted (seq ${s})"; exit 0 ;;
+    s="$(append_event question "$subj" "$text")"
+    # Also enqueue it as claimable work so an idle sibling's `next` can pick up
+    # "go answer this question" instead of it only surfacing in the digest for a
+    # human to notice. "answer-" prefix (not a re-slug()) because $subj is
+    # already slugged — slug() strips colons but keeps hyphens, and re-running it
+    # would just re-truncate/re-filter an already-valid subject for no reason.
+    tsubj="answer-${subj}"
+    ts="$(append_event task "$tsubj" "answer the open question '${subj}': ${text}")"
+    echo "❓ question on '${subj}' posted (seq ${s}) — queued task '${tsubj}' (seq ${ts}) for /led next"
+    exit 0 ;;
   answer)
     shift; subj="$(slug "${1:-}")"; shift || true; text="$*"
     { [ -z "$subj" ] || [ -z "$text" ]; } && { echo "usage: ... answer <subject> \"<answer>\""; exit 0; }
-    s="$(append_event answer "$subj" "$text")"; echo "💬 answer on '${subj}' recorded (seq ${s})"; exit 0 ;;
+    s="$(append_event answer "$subj" "$text")"
+    # Resolve the linked task regardless of who (if anyone) claimed it — the
+    # projection's _row_status() treats the latest `done` on a subject as
+    # authoritative no matter who wrote the claim, so this closes the loop even
+    # when the answerer isn't the instance that ran `next` on it.
+    ds="$(append_event done "answer-${subj}" "answered by ${sid8}")"
+    echo "💬 answer on '${subj}' recorded (seq ${s}) — closed task 'answer-${subj}' (seq ${ds})"
+    exit 0 ;;
   task)
     shift; text="$*"; [ -z "$text" ] && { echo "usage: ... task \"<desc>\"  (add 'dep:<subject>' in the text for ordering)"; exit 0; }
     subj="$(slug "$text")"
@@ -776,6 +852,17 @@ case "$phase" in
     s="$(append_event claim "$subj" "claimed by ${sid8} (branch:${curbr})" "[]" "[]" "$lease")"
     echo "🔒 claimed '${subj}' (lease ${LEASE_TTL}s, seq ${s})"; exit 0 ;;
   next)
+    shift
+    # --quiet/-q: machine-parseable form for non-human callers (e.g. `cobus
+    # swarm`'s worker loops) that would otherwise have to string-match the
+    # decorated human messages below. Purely additive: no flag -> byte-identical
+    # to the original behavior, always exit 0. With the flag: on a successful
+    # claim, print exactly one line "<subject>\t<description>" and exit 0; on
+    # nothing claimable, print nothing and exit 1. (A task description can never
+    # contain a literal tab — ensure_proj already flattens control chars to
+    # spaces — so tab is safe as the field separator.)
+    quiet=0
+    case "${1:-}" in --quiet|-q) quiet=1 ;; esac
     ensure_dirs; ensure_proj
     picked=""; desc=""
     while IFS=$'\x1f' read -r s st d; do
@@ -783,9 +870,13 @@ case "$phase" in
       deps_met "$s" "$d" || continue
       picked="$s"; desc="$d"; break
     done < <(task_rows)
-    if [ -z "$picked" ]; then echo "🟢 no open tasks with satisfied deps — queue is clear or all in-progress."; print_board; exit 0; fi
+    if [ -z "$picked" ]; then
+      [ "$quiet" = 1 ] && exit 1
+      echo "🟢 no open tasks with satisfied deps — queue is clear or all in-progress."; print_board; exit 0
+    fi
     lease=$(( $(now) + LEASE_TTL ))
     sq="$(append_event claim "$picked" "auto-claimed by ${sid8} (branch:${curbr})" "[]" "[]" "$lease")"
+    if [ "$quiet" = 1 ]; then printf '%s\t%s\n' "$picked" "$desc"; exit 0; fi
     echo "🤖 picked next task '${picked}' (seq ${sq}, lease ${LEASE_TTL}s):"; echo "    ${desc}"; exit 0 ;;
   done)
     shift; subj="$(slug "${1:-}")"; [ -z "$subj" ] && { echo "usage: ... done <subject>"; exit 0; }

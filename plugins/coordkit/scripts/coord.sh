@@ -12,6 +12,7 @@
 #   session-start    SessionStart                          bus start  → ledger start
 #                                                          → statusline drift note
 #   prompt-submit    UserPromptSubmit                      bus task   → ledger prompt
+#                                                          → guard drift report
 #   pretool-write    PreToolUse  Write|Edit|NotebookEdit   guard check → bus check
 #   pretool-bash     PreToolUse  Bash                      guard snapshot
 #   pretool-task     PreToolUse  Task                      bus subagent-start
@@ -105,9 +106,14 @@ case "$event" in
     ;;
 
   prompt-submit)
+    # guard_driftreport takes the hook JSON as a direct arg (like guard_check
+    # below), not via stdin like bus_run/ledger_run — and, unlike guard_check,
+    # it is ALWAYS ON: it never consults ck_enforcement_mode(), so it fires in
+    # coordkit's default "warn" mode too. See its header comment in guard.sh.
     ck_emit_context UserPromptSubmit \
       "$(bus_run    task   <<<"$input")" \
-      "$(ledger_run prompt <<<"$input")"
+      "$(ledger_run prompt <<<"$input")" \
+      "$(guard_driftreport "$input")"
     ;;
 
   pretool-write)

@@ -19,6 +19,97 @@ entries are no longer on disk but remain in git history
 
 ## Unreleased
 
+### Added
+- **Read-set drift warning ("your mental cache is stale").** `guard.sh` now
+  has an always-on `guard_driftreport` phase, wired into `UserPromptSubmit`,
+  that tells the model which files it already Read/Write/Edit'd this session
+  have since changed on disk — unlike the guard's deny path, this fires in
+  coordkit's default `warn` mode too, not just opt-in `guard` mode. It's
+  read-only (never mutates guard state), so a file naturally drops off the
+  report the next time it's re-Read. Best-effort attribution names a live
+  sibling session (sid8 + task) when its bus heartbeat shows it wrote the
+  drifted path; otherwise the file is reported with no guessed author.
+- **Open questions are now claimable work.** `ledger.sh ask <subject> "<q>"`
+  also queues a linked task (`answer-<subject>`) so an idle sibling instance's
+  `/led next` can auto-claim "go answer this question" instead of it only
+  sitting in the digest's "❓ Open questions" section for a human to notice.
+  `answer <subject> "<a>"` closes the loop by marking that linked task `done`
+  in the same call, regardless of who (if anyone) claimed it.
+- **Guard deny messages now carry best-effort attribution.** When enforcement
+  mode denies a Write/Edit, `guard.sh` tries to name WHO likely changed the
+  file, not just that it changed: it checks the bus's live heartbeats
+  (`agents/<sid>.json`) for a sibling whose recently-touched files include the
+  target, then falls back to the file's `claims/<sha>.json` soft lock if no
+  live heartbeat matches. A hit appends the session's sid8/branch/task (or
+  just sid8 for the weaker claims-only signal) plus a concrete `/msg` or
+  `/led ask` suggestion to the deny reason; a miss leaves the message exactly
+  as generic as before. Purely a string enrichment — the gate, the fingerprint
+  comparison, and the return codes are unchanged.
+- **Self-scheduling ledger compaction.** `ledger.sh compact` snapshots the
+  ledger's projections into `compacted-<epoch>.json` without touching the
+  append-only log, but nothing ever triggered it — it was 100% manual, so in
+  practice it never ran. `SessionStart` now checks, once per session (not on
+  every prompt — that phase already scans the log once for its own digest, so
+  this piggybacks on that same cache for free), whether `max_seq()` has
+  drifted more than `COMPACT_EVERY` (200, tunable) events past the last
+  compaction recorded for this repo's bus, and if so queues a
+  `compact-ledger-<seq>` task onto the existing task queue — claim and run it
+  like any other task (`/led claim`/`/led next`, then `cobus compact`, then
+  `/led done`). Guarded against duplicate queueing while one is already open
+  or claimed. The task subject is suffixed per occurrence rather than fixed,
+  because task-status reconciliation compares done/claim/block seqs against
+  each other but never against a `task` event's own seq — a fixed subject
+  would silently stop showing on the board after its first done cycle,
+  defeating the point.
+- **`/fleet` (`bus.sh fleet` / `cobus fleet`) — read-only cross-repo fleet
+  view.** Shows which OTHER repos on this machine currently have live
+  coordkit sessions: `bus.sh`'s `heartbeat()` now also upserts this repo's
+  root into a small local registry at `$(ck_data_dir)/fleet.json` (piggybacked
+  on heartbeat's existing call sites, independently throttled to `TICK_MIN`
+  so it doesn't add a second unthrottled write path), and `/fleet` reads that
+  registry and re-derives each repo's live/idle counts + branches at view
+  time straight from that repo's own `.coordkit-bus/agents/*.json` — the
+  registry never caches liveness. Entries for repos that no longer exist on
+  disk are skipped and pruned automatically. This is discovery only, **not**
+  cross-repo task dispatch — see `docs/BUS.md` §9 for the explicit scope
+  boundary and the local-only privacy guarantee.
+- **`cobus swarm <N>` — a queue-draining worker pool.** Spawns `N` (1-8, hard
+  ceiling, not configurable) worker loops that each auto-claim a task via the
+  ledger's `next`, "execute" it, and report the outcome back — automating what
+  was previously a human calling `/led next` by hand, one task at a time.
+  Defaults to **DRY RUN**: workers still claim for real (exercising dependency
+  ordering and lease/work-stealing), but deliberately do NOT call `done` —
+  the claim self-expires via the existing lease TTL instead, since a `done`
+  event is a permanent, trusted assertion with no "undone" verb to walk back
+  if a dry run silently marked real work complete. Real execution requires
+  both `COORDKIT_SWARM_EXEC=1` and `COORDKIT_SWARM_CMD` (a `{desc}`-templated
+  shell command); a nonzero exit calls `block` instead of `done`, so a failed
+  run never gets marked complete. Never adds a "skip permissions" flag to
+  whatever command you configure. See docs/LEDGER.md's new "Swarm mode"
+  section for the full design rationale, including the claim-race behavior
+  under concurrent cold-started workers and its mitigation.
+  - `ledger.sh next` gained a purely-additive `--quiet`/`-q` flag (byte-
+    identical output with no flag) so swarm's workers don't have to
+    string-match the decorated human-readable "picked next task" / "no open
+    tasks" messages.
+  - `bus.sh` gained a small `heartbeat` CLI phase: a bare-shell actor like a
+    swarm worker has no hook establishing the bus heartbeat `owner_live()`
+    needs to treat its claims as in-progress rather than instantly
+    reclaimable — this registers one, the same way a hooked session's
+    SessionStart/UserPromptSubmit already does.
+- **`scripts/signing.sh` — an ed25519 event-signing PROTOTYPE, deliberately
+  NOT wired into the write or read path.** A working, self-tested
+  sign/verify library (`bash signing.sh selftest`) built around the
+  `sig` field `schema/event.schema.json` already reserves. This is inert by
+  design, not an oversight: `append_event`/`_ck_emit_v2` still write
+  `sig: null` on every real event, and nothing in `ledger.sh`'s digest/delta
+  read paths calls into it. See `docs/SIGNING-PROPOSAL.md` for the
+  integration proposal (key distribution via committed
+  `.claude/coord/keys/<actor>.pub`, gated by the existing `cobus trust`
+  mechanism; hot-path cost measurements; and an honest accounting of what
+  signing would and would not protect against) that the write/read wiring
+  is waiting on.
+
 ### Fixed
 - **Linked worktrees now share the main checkout's bus.** Bus-root resolution
   follows a worktree's `.git` file back to the main checkout instead of creating

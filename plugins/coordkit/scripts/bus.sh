@@ -72,7 +72,8 @@ phase="${1:-dashboard}"
 
 STALE_SOFT=900       # 15 min -> shown as "idle"
 STALE_HARD=21600     # 6 h    -> heartbeat pruned
-TICK_MIN=10          # min seconds between statusline heartbeat ticks
+TICK_MIN=10          # min seconds between statusline heartbeat ticks; also
+                     # throttles heartbeat()'s piggybacked fleet-registry write
 NOTIFY_DEBOUNCE=60   # min seconds between desktop notifications per file
 
 now()  { date +%s; }
@@ -107,9 +108,9 @@ hashkey() {
 # ── input handling ──────────────────────────────────────────────────────────
 # dashboard/watch take a repo arg; everything else reads hook/statusline JSON.
 case "$phase" in
-  dashboard|watch|frame)
+  dashboard|watch|frame|fleet)
     input=""; cwd="${2:-$PWD}"; sid="cli" ;;
-  claim|done|tasks)
+  claim|done|tasks|heartbeat)
     # Real session id when available (falls back to "cli" for a bare shell
     # invocation) — these delegate to the ledger's task queue, whose lease/
     # work-stealing liveness check needs a sid with an actual bus heartbeat,
@@ -190,6 +191,34 @@ heartbeat() {  # $1=task (or "") $2=file-to-append (or "")
                     | reverse | unique | .[0:8] )}
       ' > "${rec}.tmp" 2>/dev/null && mv "${rec}.tmp" "$rec" 2>/dev/null
   ) 9>"${rec}.lock" 2>/dev/null
+  fleet_register
+  return 0
+}
+
+# Piggybacks on heartbeat()'s own call frequency — no separate/unthrottled
+# write path. heartbeat() itself fires on every SessionStart/UserPromptSubmit/
+# tool-use, which is too hot a cadence for a file shared across every repo on
+# the machine, so this is throttled independently via a per-repo marker file
+# (same debounce idiom as the desktop-notify NOTIFY_DEBOUNCE marker below),
+# reusing TICK_MIN as the interval. Registers ONLY this repo's own root ->
+# {last_seen} in $(ck_data_dir)/fleet.json — see the `fleet` phase for the
+# cross-repo read side, which re-derives liveness from each registered repo's
+# OWN .coordkit-bus/agents/*.json rather than trusting a cached count here.
+fleet_register() {
+  local mk="${bus}/.fleet-tick" d f
+  if [ -f "$mk" ]; then
+    [ $(( $(now) - $(mtime "$mk") )) -lt "$TICK_MIN" ] && return 0
+  fi
+  d="$(ck_data_dir)"; f="${d}/fleet.json"
+  mkdir -p "$d" 2>/dev/null || return 0
+  : > "$mk" 2>/dev/null
+  ( flock 9
+    local prev='{}'
+    [ -f "$f" ] && prev="$(cat "$f" 2>/dev/null || printf '{}')"
+    printf '%s' "$prev" | jq --arg p "$root" --argjson t "$(now)" \
+      '(. // {}) | .repos[$p] = {last_seen: $t}' \
+      > "${f}.tmp" 2>/dev/null && mv "${f}.tmp" "$f" 2>/dev/null
+  ) 9>"${f}.lock" 2>/dev/null
   return 0
 }
 
@@ -231,6 +260,32 @@ collisions() {
     done <<< "$(printf '%s' "${rest:-}" | tr '\037' '\n')"
   done | sort -u | awk -F'\t' '{c[$2]++; who[$2]=who[$2] (who[$2]==""?"":", ") $1}
                                 END{for(p in c) if(c[p]>1) printf "%s\t%s\n",p,who[p]}'
+}
+
+# Cross-repo counterpart of others_live(): given ANOTHER repo's root (not
+# $root/$agents — those are always THIS repo), re-derive live/idle session
+# counts and the distinct branches in use by reading straight from that
+# repo's OWN .coordkit-bus/agents/*.json. Used only by the `fleet` phase.
+#
+# Deliberately a separate small pass rather than a generalized others_live()
+# (parameterized bus dir + optional self-exclusion): others_live() is on the
+# SessionStart hot path and reused by badge's classifier too, so reshaping its
+# signature for a view-only cross-repo case risked more than this task
+# warrants. It intentionally mirrors the SAME age/state formula (STALE_SOFT/
+# STALE_HARD against last_seen) so liveness isn't redefined a second time,
+# just re-applied to a different agents/ directory.
+# Prints "<live>\t<idle>\t<branch1,branch2,...>".
+fleet_repo_stats() {
+  local repo_root="$1" af al abr aage live=0 idle=0 branches="" t; t="$(now)"
+  for af in "${repo_root}/.coordkit-bus/agents"/*.json; do
+    [ -e "$af" ] || continue
+    IFS=$'\t' read -r al abr <<< "$(jq -r '[.last_seen // 0, .branch // "?"] | @tsv' "$af" 2>/dev/null)"
+    case "${al:-}" in ''|*[!0-9]*) al=0 ;; esac
+    aage=$(( t - al )); [ "$aage" -gt "$STALE_HARD" ] && continue
+    if [ "$aage" -gt "$STALE_SOFT" ]; then idle=$(( idle + 1 )); else live=$(( live + 1 )); fi
+    case ",${branches}," in *",${abr},"*) ;; *) branches="${branches:+${branches},}${abr}" ;; esac
+  done
+  printf '%s\t%s\t%s\n' "$live" "$idle" "$branches"
 }
 
 drain_inbox() {  # prints message lines for $sid and deletes them; returns 0 if any
@@ -504,6 +559,21 @@ case "$phase" in
     exit 0
     ;;
 
+  # ── heartbeat: bare-CLI liveness registration (no hook JSON available) ────
+  # ledger.sh's owner_live() only treats a claim as "in-progress" (not
+  # immediately reclaimable) when the claiming sid has a live bus heartbeat —
+  # normally established for free by the SessionStart/UserPromptSubmit hooks.
+  # A bare-shell actor with no hook driving it (e.g. `cobus swarm`'s worker
+  # loops) never gets one, so without this its very first claim would look
+  # instantly abandoned to every other reader and be re-claimed out from under
+  # it on the next `next`/`board`. Reuses the same heartbeat() a hooked session
+  # writes — no new state shape, no separate liveness path to keep in sync.
+  heartbeat)
+    ensure_dirs && heartbeat "" ""
+    echo "💓 heartbeat registered for ${sid8} (branch:${curbr})"
+    exit 0
+    ;;
+
   # ── task board — a free-text front-end over the ledger's own task queue ────
   # (no separate storage here anymore; see the header note and docs/LEDGER.md)
   claim)
@@ -588,6 +658,53 @@ case "$phase" in
       echo "📭 $(( seen - stale )) live instance(s) found, none matched \"${target}\" — live targets: ${live_desc}"
     fi
     exit 1
+    ;;
+
+  # ── cross-repo fleet view — READ-ONLY discovery, not task dispatch ────────
+  # Reads the local, per-machine registry heartbeat()/fleet_register() writes
+  # to $(ck_data_dir)/fleet.json (repo root -> {last_seen}) and, for each
+  # entry, re-derives live/idle counts + branches at VIEW TIME by reading
+  # THAT repo's own .coordkit-bus/agents/*.json directly — the registry only
+  # remembers WHERE repos are; liveness is cheap to recompute and a cached
+  # copy would go stale between heartbeats. Entries whose path no longer
+  # exists on disk (moved/deleted repo) are skipped from the listing and
+  # pruned from the registry, under the same lock fleet_register() uses.
+  fleet)
+    fd="$(ck_data_dir)/fleet.json"
+    if [ ! -s "$fd" ]; then
+      echo "🛰️  coordkit fleet — no repos registered yet (a repo registers itself on its next coordkit heartbeat)."
+      exit 0
+    fi
+    paths="$(jq -r '.repos // {} | keys[]' "$fd" 2>/dev/null | sort)"
+    if [ -z "$paths" ]; then
+      echo "🛰️  coordkit fleet — no repos registered yet."
+      exit 0
+    fi
+    printf '🛰️  coordkit fleet  %s\n' "$(iso)"
+    any=0 stale_paths=""
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      if [ ! -d "$p" ]; then stale_paths+="${p}"$'\n'; continue; fi
+      any=1
+      here=""; [ "$p" = "$root" ] && here="  (this repo)"
+      IFS=$'\t' read -r flive fidle fbr <<< "$(fleet_repo_stats "$p")"
+      printf '  %s%s\n' "$p" "$here"
+      printf '      %s live · %s idle' "${flive:-0}" "${fidle:-0}"
+      [ -n "${fbr:-}" ] && printf '   branch: %s' "$fbr"
+      printf '\n'
+    done <<< "$paths"
+    [ "$any" = 0 ] && echo "  (no registered repos still exist on disk)"
+    if [ -n "$stale_paths" ]; then
+      ( flock 9
+        cur="$(cat "$fd" 2>/dev/null || printf '{}')"
+        while IFS= read -r sp; do
+          [ -n "$sp" ] || continue
+          cur="$(printf '%s' "$cur" | jq --arg p "$sp" 'del(.repos[$p])' 2>/dev/null)"
+        done <<< "$stale_paths"
+        printf '%s' "$cur" > "${fd}.tmp" 2>/dev/null && mv "${fd}.tmp" "$fd" 2>/dev/null
+      ) 9>"${fd}.lock" 2>/dev/null
+    fi
+    exit 0
     ;;
 
   # ── one-shot snapshot (/bus) and live monitor (watch) ─────────────────────
