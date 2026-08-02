@@ -61,6 +61,18 @@ CK_ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GE
 # single object this hook is allowed to emit. Blobs that are empty, unparseable,
 # or carry no additionalContext contribute nothing; if nothing survives we print
 # nothing at all, which is what "no context to add" has always looked like.
+#
+# Also emits an NDJSON {"type":"message",...} line with the same text so the
+# digest shows up as a normal, readable line in the user's terminal — the
+# hookSpecificOutput JSON alone only reaches the model (as invisible
+# context), never the user, which is why the ledger/bus digest used to be
+# effectively invisible unless you went digging in raw hook output.
+#
+# The visible line is prefixed "[coordkit]" so it's distinguishable at a
+# glance from other plugins' hook messages (e.g. claude-mem's semantic-match
+# digest) that land in the same NDJSON {"type":"message"} shape on the same
+# stdout stream — without a tag there's no way to tell provenance apart from
+# reading the body text.
 ck_emit_context() {  # <hookEventName> [json_blob ...]
   local ev="$1" ctx="" blob part
   shift
@@ -73,8 +85,9 @@ ck_emit_context() {  # <hookEventName> [json_blob ...]
     ctx+="$part"
   done
   [ -n "$ctx" ] || return 0
+  printf '{"type":"message","message":%s}\n' "$(printf '[coordkit] %s' "$ctx" | jq -Rs .)"
   printf '{"hookSpecificOutput":{"hookEventName":%s,"additionalContext":%s}}\n' \
-    "$(printf '%s' "$ev" | jq -Rs .)" "$(printf '%s' "$ctx" | jq -Rs .)"
+    "$(printf '%s' "$ev" | jq -Rs .)" "$(printf '[coordkit]\n%s' "$ctx" | jq -Rs .)"
 }
 
 event="${1:-}"
