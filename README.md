@@ -53,7 +53,7 @@ The Claude Code adapter is the one shipped in this repository today. Its
 details, not requirements of the coordination model itself. The runtime now
 accepts `COORDKIT_*`, `CLAUDE_*`, `CODEX_*`, and `GEMINI_*` adapter aliases
 for the shared shell helpers. Adapter slots for Claude Code, Codex, and Gemini
-live in [`plugins/coordkit/adapters/`](/home/anga/workspace/projects/coordkit/plugins/coordkit/adapters/).
+live in [`plugins/coordkit/adapters/`](plugins/coordkit/adapters/).
 The Claude slot is shipped; the Codex and Gemini slots are scaffolded and use
 the same core concepts and on-disk coordination state.
 

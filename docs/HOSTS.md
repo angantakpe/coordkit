@@ -25,7 +25,7 @@ The runtime now accepts these adapter env families:
 - `CODEX_*` and `GEMINI_*` as parallel adapter aliases
 
 Adapter slots are tracked under
-[`plugins/coordkit/adapters/`](/home/anga/workspace/projects/coordkit/plugins/coordkit/adapters/):
+[`plugins/coordkit/adapters/`](../plugins/coordkit/adapters/):
 
 - `claude-code/` is shipped and wired to the current plugin manifest.
 - `codex/` is scaffolded for a future Codex host integration.
