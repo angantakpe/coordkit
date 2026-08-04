@@ -2,8 +2,7 @@
 
 All notable changes to **coordkit** are documented here. This project follows
 [Semantic Versioning](https://semver.org/). The plugin `version` field in
-`.claude-plugin/plugin.json` is the canonical tooling-version axis for the
-current Claude Code adapter — bump it to ship an update to installed users.
+the Claude and Codex plugin manifests is the canonical tooling-version axis.
 
 coordguard used to be a separate plugin on its own version axis; as of 3.0.0 its
 enforcement logic is merged in here. It shipped one further release, 2.0.0, as
@@ -17,9 +16,48 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
-## Unreleased
+## 5.0.0
 
 ### Added
+- A strict automatic-context governor with `quiet`, `compact`, and `debug`
+  modes; 600/250/120-token defaults for session, prompt, and collision context;
+  bounded top-K task/decision/question/event/peer/message selection; latest-state
+  coalescing; unchanged-state TTL suppression; and short on-demand retrieval
+  hints instead of unbounded projections.
+- Privacy-safe rotating context telemetry under
+  `.coordkit-bus/metrics/context.ndjson`. It records byte/token estimates and
+  suppression counts, never prompts, paths, event bodies, or generated context.
+- Stress coverage with hundreds of ledger records plus peer, inbox, skill TTL,
+  package-validation, and hard decoded-output-cap assertions.
+- A shipped Codex plugin manifest, repository marketplace, lifecycle hook
+  configuration, and payload adapter. The default cross-host
+  `hooks/hooks.json` is discovered without an unsupported manifest override and
+  dispatches through the host-specific translator. Codex `apply_patch` calls are expanded to
+  one shared-core event per path; conservative read-only Bash inspection records
+  guard fingerprints; native subagent events map to the existing bus records.
+- A bundled `$coordkit` Codex skill for bus, fleet, ledger, messaging, guard,
+  and relay operations.
+- Host-attributed heartbeats, ledger events, and messages. New records carry
+  `host: claude-code|codex|gemini|cli`; session, collision, guard, dashboard,
+  and subagent output identifies the owning runtime. Old records render as
+  `unknown`.
+- A production-capable relay protocol and dependency-free Node 20+ server:
+  room-scoped bearer authorization, fsynced append, `eid` deduplication,
+  acknowledgements, paginated cursor replay, optional long polling, durable
+  client outbox retry, crash-safe cursor advancement, and explicit sync/status
+  CLI verbs.
+- End-to-end tests for Codex hook translation/guard behavior/host attribution
+  and relay auth/dedup/replay/offline recovery.
+- Shared ledger cursors now persist per-actor monotonic counters (plus a legacy
+  total-order watermark), while projections reconcile by ordered stream
+  position. Remote events with lower replica-local sequence numbers and newly
+  synced events that sort before the old global watermark are not skipped.
+- Relay room initialization is single-flight across concurrent cold-start
+  requests. Clients reject arbitrary plaintext HTTP before bearer credentials
+  are prepared, with an explicit opt-in limited to loopback development.
+- `cobus init-relay` for a secret-free repo pointer, plus a top-level-only TOML
+  writer shared with `init-git` so transport setup preserves guard mode.
+
 - **Read-set drift warning ("your mental cache is stale").** `guard.sh` now
   has an always-on `guard_driftreport` phase, wired into `UserPromptSubmit`,
   that tells the model which files it already Read/Write/Edit'd this session

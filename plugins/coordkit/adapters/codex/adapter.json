@@ -1,9 +1,9 @@
 {
   "host": "codex",
-  "status": "scaffolded",
+  "status": "shipped",
   "runtime": "shared-shell",
-  "manifestPath": null,
-  "hooksPath": null,
-  "commandsPath": null,
-  "notes": "Codex-specific packaging and lifecycle wiring still need to be supplied by the host integration."
+  "manifestPath": "../../.codex-plugin/plugin.json",
+  "hooksPath": "../../hooks/hooks.json",
+  "commandsPath": "../../skills/coordkit",
+  "notes": "Codex plugin hooks translate apply_patch, Bash inspection, and native subagent lifecycle events into the shared runtime contract."
 }

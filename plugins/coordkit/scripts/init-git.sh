@@ -64,18 +64,11 @@ if [ ! -f "$toml" ]; then
   if [ -f "${TPL}/coord.toml" ]; then cp -f "${TPL}/coord.toml" "$toml"
   else printf 'mode = "local"\nroom_id = "default"\nremote = ""\nproto = "2.0"\nmin_reader = "2.0"\n' > "$toml"; fi
 fi
-# flip the three pointer fields in place (top-level keys only)
-_set() { # key value
-  local k="$1" v="$2"
-  if grep -qE "^[[:space:]]*${k}[[:space:]]*=" "$toml"; then
-    sed -i -E "s|^([[:space:]]*${k}[[:space:]]*=).*|\1 \"${v}\"|" "$toml"
-  else
-    printf '%s = "%s"\n' "$k" "$v" >> "$toml"
-  fi
-}
-_set mode git
-_set room_id "$room"
-[ -n "$remote" ] && _set remote "$remote"
+# Flip only the flat transport pointer fields before the first TOML table.
+# In particular, top-level `mode` must not touch `[enforcement].mode`.
+ck_toml_set_top "$toml" mode git || exit 1
+ck_toml_set_top "$toml" room_id "$room" || exit 1
+if [ -n "$remote" ]; then ck_toml_set_top "$toml" remote "$remote" || exit 1; fi
 
 # 4) ensure the project .gitignore keeps local-only coordination state out of the
 #    user's branch. Three entries:

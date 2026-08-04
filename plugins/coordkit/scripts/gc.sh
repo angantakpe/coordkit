@@ -165,7 +165,7 @@ if [ "$NUKE" = 1 ]; then
         ${bus}
       That discards the shared ledger (ledger.jsonl), the task board, every
       claim, and all activity history for this repo — irreversibly, and for
-      every Claude instance using it, including ones live right now.
+      every CoordKit instance using it, including ones live right now.
 
       Re-run with BOTH flags if that is genuinely what you want:
         cobus gc --nuke --yes-i-am-sure --apply

@@ -10,7 +10,7 @@
 # inter-instance messaging. The bus never blocks a tool call, in any mode.
 #
 # State in <repo>/.coordkit-bus/:
-#   agents/<sid>.json           heartbeat {sid,branch,cwd,task,files,last_seen}
+#   agents/<sid>.json           heartbeat {sid,host,branch,cwd,task,files,last_seen}
 #   claims/<sha>.json           soft FILE lock {path,sid,ts} — unrelated to TASK claims
 #   subagents/<sid>/<tid>.json  a currently-running subagent this session launched:
 #                                {sid,tool_use_id,subagent_type,description,started_at}
@@ -28,7 +28,7 @@
 #
 # Reached from hooks through scripts/coord.sh, the single dispatcher, which
 # SOURCES this file and calls bus_run:
-#   SessionStart            -> start    register + greet (who's live, same-branch ⚠, messages)
+#   SessionStart            -> start    register + inbox / file-overlap alerts
 #   UserPromptSubmit        -> task     record current task + deliver inbox messages
 #   PostToolUse Write|Edit|NotebookEdit|Read|Bash -> record  feed + heartbeat + claims
 #   PreToolUse  Write|Edit|NotebookEdit -> check  soft collision warning + desktop notify
@@ -126,6 +126,13 @@ case "$phase" in
     sid="$(printf '%s' "$input" | jq -r '.session_id // "nosession"' 2>/dev/null)" ;;
 esac
 
+# Session and tool-use ids become path components below. Native hosts provide
+# UUID-like values, but direct hook invocation is still untrusted input; fold
+# anything path-shaped to a stable key before touching the filesystem.
+case "$sid" in
+  ""|.|..|*/*|*\\*) sid="session-$(hashkey "$sid")" ;;
+esac
+
 root="$(resolve_root "$cwd")"
 bus="${root}/.coordkit-bus"
 agents="${bus}/agents"; claims="${bus}/claims"; inbox="${bus}/inbox"
@@ -133,6 +140,54 @@ subagents="${bus}/subagents"
 log="${bus}/activity.log"
 sid8="${sid:0:8}"
 curbr="$(branch_of "$cwd")"
+host="$(ck_host)"
+
+# Compact hook-context controls. Environment variables take precedence over
+# the repo's optional [context] table; defaults keep hook payloads small even
+# when no config has been initialized yet. The dashboard remains the full,
+# on-demand view.
+context_cfg_value() { # <key>
+  local key="$1" cfg
+  cfg="$(ck_coord_toml "$root")"
+  [ -f "$cfg" ] || return 1
+  awk -v want="$key" '
+    /^[[:space:]]*\[/ {
+      section=$0; sub(/^[[:space:]]*\[/,"",section); sub(/\].*$/,"",section)
+      gsub(/[[:space:]]/,"",section); next
+    }
+    section == "context" {
+      line=$0; sub(/[[:space:]]*#.*/,"",line)
+      split(line,p,"="); k=p[1]; gsub(/[[:space:]]/,"",k)
+      if (k == want) {
+        sub(/^[^=]*=[[:space:]]*/,"",line); gsub(/^[[:space:]\"]+|[[:space:]\"]+$/,"",line)
+        print line; exit
+      }
+    }
+  ' "$cfg" 2>/dev/null
+}
+
+context_int_setting() { # <env-name> <toml-key> <default> <minimum> [legacy-env]
+  local env_name="$1" key="$2" fallback="$3" minimum="$4" legacy="${5:-}" value
+  value="${!env_name:-}"
+  case "$value" in ''|*[!0-9]*) ;; *) [ "$value" -ge "$minimum" ] && { printf '%s' "$value"; return; } ;; esac
+  if [ -n "$legacy" ]; then
+    value="${!legacy:-}"
+    case "$value" in ''|*[!0-9]*) ;; *) [ "$value" -ge "$minimum" ] && { printf '%s' "$value"; return; } ;; esac
+  fi
+  value="$(context_cfg_value "$key" 2>/dev/null || true)"
+  case "$value" in ''|*[!0-9]*) ;; *) [ "$value" -ge "$minimum" ] && { printf '%s' "$value"; return; } ;; esac
+  printf '%s' "$fallback"
+}
+
+CONTEXT_MAX_PEERS="$(context_int_setting COORDKIT_CONTEXT_MAX_PEERS max_peers 1 1)"
+CONTEXT_MAX_MESSAGES="$(context_int_setting COORDKIT_CONTEXT_MAX_MESSAGES max_messages 2 1)"
+CONTEXT_BODY_CHARS="$(context_int_setting COORDKIT_CONTEXT_EVENT_BODY_CHARS event_body_chars 80 24 COORDKIT_CONTEXT_BODY_CHARS)"
+CONTEXT_COLLISION_TOKENS="$(context_int_setting COORDKIT_CONTEXT_COLLISION_TOKENS collision_tokens 64 32)"
+CONTEXT_BYTES_PER_TOKEN="$(context_int_setting COORDKIT_CONTEXT_BYTES_PER_TOKEN bytes_per_token 4 1)"
+
+compact_field() { # <untrusted display text>
+  printf '%s' "$1" | tr '\000-\037' ' ' | cut -c1-"$CONTEXT_BODY_CHARS"
+}
 
 # Path to the ledger, whose task queue backs claim/done/tasks below.
 LEDGER_SH="$(ck_plugin_root)/scripts/ledger.sh"
@@ -181,10 +236,10 @@ heartbeat() {  # $1=task (or "") $2=file-to-append (or "")
   ( flock 9
     [ -f "$rec" ] && prev="$(cat "$rec" 2>/dev/null || printf '{}')"
     printf '%s' "$prev" | jq \
-      --arg sid "$sid" --arg br "$br" --arg cwd "$cwd" \
+      --arg sid "$sid" --arg host "$host" --arg br "$br" --arg cwd "$cwd" \
       --argjson t "$t" --arg task "$task_set" --arg file "$file_add" '
         . as $p
-        | {sid:$sid, branch:$br, cwd:$cwd, last_seen:$t}
+        | {sid:$sid, host:$host, branch:$br, cwd:$cwd, last_seen:$t}
         + {task:  ( if $task != "" then $task else ($p.task // "") end )}
         + {files: ( ($p.files // [])
                     | if $file != "" then (. + [$file]) else . end
@@ -225,21 +280,21 @@ fleet_register() {
 agent_age()    { local f="${agents}/$1.json" l; l="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$l" ] && l=0; echo $(( $(now) - l )); }
 agent_live()   { [ -f "${agents}/$1.json" ] && [ "$(agent_age "$1")" -le "$STALE_HARD" ]; }
 
-# tab-rows of OTHER live agents: sid8 \t state \t age \t branch \t cwd \t task \t files
+# tab-rows: sid8 \t host \t state \t age \t branch \t cwd \t task \t files
 others_live() {
   # One jq per agent file (not one per field): @tsv also escapes any literal
   # tab inside task/branch, so the tab-separated contract stays intact.
-  local t f s last age br cwd task files state; t="$(now)"
+  local t f s oh last age br cwd task files state; t="$(now)"
   for f in "$agents"/*.json; do
     [ -e "$f" ] || continue
-    IFS=$'\t' read -r s last br cwd task files <<< "$(jq -r \
-      '[.sid // "", .last_seen // 0, .branch // "?", .cwd // "", .task // "", ((.files // [])|join(", "))] | @tsv' \
+    IFS=$'\t' read -r s oh last br cwd task files <<< "$(jq -r \
+      '[.sid // "", .host // "unknown", .last_seen // 0, .branch // "?", .cwd // "", .task // "", ((.files // [])|join(", "))] | @tsv' \
       "$f" 2>/dev/null)"
     [ "$s" = "$sid" ] && continue
     case "${last:-}" in ''|*[!0-9]*) last=0 ;; esac
     age=$(( t - last )); [ "$age" -gt "$STALE_HARD" ] && continue
     state="live"; [ "$age" -gt "$STALE_SOFT" ] && state="idle"
-    printf '%s\t%s\t%ss\t%s\t%s\t%s\t%s\n' "${s:0:8}" "$state" "$age" "$br" "$cwd" "$task" "$files"
+    printf '%s\t%s\t%s\t%ss\t%s\t%s\t%s\t%s\n' "${s:0:8}" "$oh" "$state" "$age" "$br" "$cwd" "$task" "$files"
   done
 }
 
@@ -288,12 +343,23 @@ fleet_repo_stats() {
   printf '%s\t%s\t%s\n' "$live" "$idle" "$branches"
 }
 
-drain_inbox() {  # prints message lines for $sid and deletes them; returns 0 if any
-  local box="${inbox}/${sid}" f got=1 out=""
+inbox_count() {
+  local box="${inbox}/${sid}" f n=0
+  [ -d "$box" ] || { printf '0'; return; }
+  for f in "$box"/*.msg; do [ -e "$f" ] && n=$(( n + 1 )); done
+  printf '%s' "$n"
+}
+
+drain_inbox() {  # delivers at most CONTEXT_MAX_MESSAGES; excess stays queued
+  local box="${inbox}/${sid}" f got=1 out="" shown=0 text
   [ -d "$box" ] || { printf ''; return 1; }
   for f in "$box"/*.msg; do
     [ -e "$f" ] || continue
-    out+="  📨 $(cat "$f" 2>/dev/null)"$'\n'; rm -f "$f" 2>/dev/null; got=0
+    [ "$shown" -ge "$CONTEXT_MAX_MESSAGES" ] && continue
+    text="$(cat "$f" 2>/dev/null)"
+    out+="- $(compact_field "$text")"$'\n'
+    rm -f "$f" 2>/dev/null
+    shown=$(( shown + 1 )); got=0
   done
   # drop the now-empty per-sid dir so long-lived buses don't accumulate one
   # stub directory per session forever; rmdir no-ops if non-empty or gone.
@@ -324,39 +390,34 @@ case "$phase" in
   # ── SessionStart ──────────────────────────────────────────────────────────
   start)
     ensure_dirs && prune_dead && heartbeat "" ""
+    msg_total="$(inbox_count)"
     msgs="$(drain_inbox)"; have_msgs=$?
-    rows="$(others_live)"
-    samebr=""
-    samebr_lines=""
-    if [ -n "$rows" ]; then
-      while IFS=$'\t' read -r id st age br cwd task files; do
-        [ "$br" = "$curbr" ] && [ "$br" != "no-git" ] && [ "$br" != "detached" ] && [ -n "$br" ] || continue
-        samebr+="${id} "
-        samebr_lines+="  • ${id}"
-        [ -n "$cwd" ] && samebr_lines+=" path:${cwd}"
-        samebr_lines+=$'\n'
-      done <<< "$rows"
+    msg_shown="$msg_total"; [ "$msg_shown" -gt "$CONTEXT_MAX_MESSAGES" ] && msg_shown="$CONTEXT_MAX_MESSAGES"
+    msg_hidden=$(( msg_total - msg_shown ))
+    ctx=""; suppressed=0
+    if [ "$have_msgs" -eq 0 ] && [ -n "$msgs" ]; then
+      ctx+="CK inbox (${msg_shown}/${msg_total}):"$'\n'"${msgs}"
+      if [ "$msg_hidden" -gt 0 ]; then ctx+="… +${msg_hidden} queued for next prompt"$'\n'; suppressed=$(( suppressed + msg_hidden )); fi
     fi
-    ctx=""
-    [ "$have_msgs" -eq 0 ] && [ -n "$msgs" ] && ctx+="📨 Messages waiting for you:"$'\n'"${msgs}"
-    if [ -n "$samebr" ]; then
-      ctx+="⚠️  COLLISION RISK: live instance(s) on your SAME branch (${curbr}):"$'\n'
-      ctx+="${samebr_lines}"
-      ctx+="Coordinate or use a separate branch before committing."$'\n'
+    collision_rows="$(collisions)"
+    if [ -n "$collision_rows" ]; then
+      collision_total="$(printf '%s\n' "$collision_rows" | awk 'NF{n++} END{print n+0}')"
+      collision_shown=0
+      ctx+="CK COLLISION: ${collision_total} overlapping file(s) with live peer(s):"$'\n'
+      while IFS=$'\t' read -r path who; do
+        [ -n "$path" ] || continue
+        [ "$collision_shown" -ge "$CONTEXT_MAX_PEERS" ] && continue
+        ctx+="- $(compact_field "$path") <- $(compact_field "$who")"$'\n'
+        collision_shown=$(( collision_shown + 1 ))
+      done <<< "$collision_rows"
+      if [ "$collision_total" -gt "$collision_shown" ]; then
+        ctx+="… +$(( collision_total - collision_shown )) more overlapping file(s)"$'\n'
+        suppressed=$(( suppressed + collision_total - collision_shown ))
+      fi
+      ctx+="Reconcile before editing or committing."$'\n'
     fi
-    if [ -n "$rows" ]; then
-      ctx+="🛰️  Other coordkit instances live in this repo (.coordkit-bus):"$'\n'
-      while IFS=$'\t' read -r id st age br cwd task files; do
-        ctx+="  • ${id} [${st}, ${age} ago] branch:${br}"
-        [ -n "$cwd" ] && ctx+=" path:${cwd}"
-        [ -n "$task" ]  && ctx+=" — task: ${task}"
-        [ -n "$files" ] && ctx+=" — touching: ${files}"
-        ctx+=$'\n'
-      done <<< "$rows"
-      ctx+="Run /bus for the dashboard, /claim to take a task, /msg to ping another instance."
-    fi
-    [ -n "$ctx" ] && printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":%s}}\n' \
-      "$(printf '%s' "$ctx" | jq -Rs .)"
+    [ -n "$ctx" ] && printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":%s},"coordkitMetrics":{"suppressed":%s}}\n' \
+      "$(printf '%s' "$ctx" | jq -Rs .)" "$suppressed"
     exit 0
     ;;
 
@@ -365,11 +426,15 @@ case "$phase" in
     prompt="$(printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null)"
     prompt="$(printf '%s' "$prompt" | tr '\n' ' ' | cut -c1-120)"
     [ -n "$prompt" ] && heartbeat "$prompt" ""
+    msg_total="$(inbox_count)"
     msgs="$(drain_inbox)"; have_msgs=$?
     if [ "$have_msgs" -eq 0 ] && [ -n "$msgs" ]; then
-      ctx="📨 Message(s) from another coordkit instance in this repo:"$'\n'"${msgs}"
-      printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%s}}\n' \
-        "$(printf '%s' "$ctx" | jq -Rs .)"
+      msg_shown="$msg_total"; [ "$msg_shown" -gt "$CONTEXT_MAX_MESSAGES" ] && msg_shown="$CONTEXT_MAX_MESSAGES"
+      msg_hidden=$(( msg_total - msg_shown ))
+      ctx="CK inbox (${msg_shown}/${msg_total}):"$'\n'"${msgs}"
+      [ "$msg_hidden" -gt 0 ] && ctx+="… +${msg_hidden} queued for next prompt"$'\n'
+      printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%s},"coordkitMetrics":{"suppressed":%s}}\n' \
+        "$(printf '%s' "$ctx" | jq -Rs .)" "$msg_hidden"
     fi
     exit 0
     ;;
@@ -384,14 +449,14 @@ case "$phase" in
     case "$tn" in
       Write|Edit|NotebookEdit)
         [ -z "$file" ] && exit 0
-        rel="${file#$root/}"; heartbeat "" "$rel"
+        rel="${file#"$root"/}"; heartbeat "" "$rel"
         printf '%s\t%s\tedit\t%s\n' "$(iso)" "$sid8" "$rel" >> "$log" 2>/dev/null
         key="$(hashkey "$file")"
         jq -n --arg p "$rel" --arg sid "$sid" --argjson ts "$(now)" \
           '{path:$p, sid:$sid, ts:$ts}' > "${claims}/${key}.json" 2>/dev/null ;;
       Read)
         [ -z "$file" ] && exit 0
-        rel="${file#$root/}"; heartbeat "" ""
+        rel="${file#"$root"/}"; heartbeat "" ""
         printf '%s\t%s\tread\t%s\n' "$(iso)" "$sid8" "$rel" >> "$log" 2>/dev/null ;;
       Bash)
         [ -z "$cmd" ] && exit 0
@@ -421,13 +486,17 @@ case "$phase" in
     case "${cts:-}" in ''|*[!0-9]*) cts=0 ;; esac
     [ $(( $(now) - cts )) -gt "$STALE_SOFT" ] && exit 0
     obr="$(jq -r '.branch // "?"' "${agents}/${owner}.json" 2>/dev/null)"
-    age="$(agent_age "$owner")"; rel="${file#$root/}"
+    ohost="$(jq -r '.host // "unknown"' "${agents}/${owner}.json" 2>/dev/null)"
+    age="$(agent_age "$owner")"; rel="${file#"$root"/}"
     # debounced desktop notification
     mk="${bus}/.notify-${key}"
     do_notify=1
     if [ -f "$mk" ]; then [ $(( $(now) - $(mtime "$mk") )) -lt "$NOTIFY_DEBOUNCE" ] && do_notify=0; fi
-    if [ "$do_notify" -eq 1 ]; then : > "$mk" 2>/dev/null; notify "coordkit collision" "${owner:0:8} (branch:${obr}) is also editing ${rel##*/}"; fi
-    msg="🔔 Another live coordkit instance (${owner:0:8}, branch:${obr}, active ${age}s ago) recently edited \"${rel}\". Soft lock: not blocking — reconcile, don't clobber. Run /bus or /msg ${owner:0:8} to coordinate."
+    if [ "$do_notify" -eq 1 ]; then : > "$mk" 2>/dev/null; notify "coordkit collision" "${owner:0:8} (${ohost}, branch:${obr}) is also editing ${rel##*/}"; fi
+    rel="$(compact_field "$rel")"
+    msg="CK COLLISION: ${owner:0:8} host=${ohost} br=${obr} edited ${rel} ${age}s ago. Soft warning; reconcile. $(ck_coordination_hint "${owner:0:8}")"
+    collision_bytes=$(( CONTEXT_COLLISION_TOKENS * CONTEXT_BYTES_PER_TOKEN ))
+    msg="$(ck_utf8_prefix_bytes "$msg" "$collision_bytes")"
     printf '{"systemMessage":%s,"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' \
       "$(printf '%s' "$msg" | jq -Rs .)" "$(printf '%s' "$msg" | jq -Rs .)"
     exit 0
@@ -454,6 +523,7 @@ case "$phase" in
       fi
       exit 0
     fi
+    case "$tid" in *[!A-Za-z0-9._:-]*) tid="$(hashkey "$tid")" ;; esac
     stype="$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)"
     sdesc="$(printf '%s' "$input" | jq -r '.tool_input.description // empty' 2>/dev/null)"
     heartbeat "" ""
@@ -464,7 +534,7 @@ case "$phase" in
       > "${rec}.tmp" 2>/dev/null && mv "${rec}.tmp" "$rec" 2>/dev/null
     [ -n "$stype" ] || exit 0
     # soft heads-up: is any OTHER live sibling already running this same subagent_type?
-    hit="" hitdesc=""
+    hit="" hithost="unknown" hitdesc=""
     for f in "$subagents"/*/*.json; do
       [ -e "$f" ] || continue
       IFS=$'\t' read -r osid ot od <<< "$(jq -r \
@@ -472,12 +542,15 @@ case "$phase" in
       [ "$osid" = "$sid" ] && continue
       [ "$ot" = "$stype" ] || continue
       agent_live "$osid" || continue
-      hit="${osid:0:8}"; hitdesc="$od"; break
+      hit="${osid:0:8}"
+      hithost="$(jq -r '.host // "unknown"' "${agents}/${osid}.json" 2>/dev/null)"
+      hitdesc="$od"; break
     done
     [ -n "$hit" ] || exit 0
-    msg="🤖 Another live coordkit instance (${hit}) is also running a \"${stype}\" subagent"
-    [ -n "$hitdesc" ] && msg+=" (${hitdesc})"
-    msg+=" right now. Not blocking — check /bus before duplicating the work."
+    msg="CK subagent overlap: ${hit} host=${hithost} type=$(compact_field "$stype")"
+    [ -n "$hitdesc" ] && msg+=" desc=$(compact_field "$hitdesc")"
+    msg+=". Allowed; $(ck_coordination_hint "$hit")"
+    msg="$(ck_utf8_prefix_bytes "$msg" "$(( CONTEXT_COLLISION_TOKENS * CONTEXT_BYTES_PER_TOKEN ))")"
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":%s,"additionalContext":%s}}\n' \
       "$(printf '%s' "$msg" | jq -Rs .)" "$(printf '%s' "$msg" | jq -Rs .)"
     exit 0
@@ -486,7 +559,8 @@ case "$phase" in
   # ── PostToolUse Task: the subagent finished — drop its running record ─────
   subagent-stop)
     tid="$(printf '%s' "$input" | jq -r '.tool_use_id // empty' 2>/dev/null)"
-    [ -n "$tid" ] && rm -f "${subagents}/${sid}/${tid}.json" 2>/dev/null
+    case "$tid" in *[!A-Za-z0-9._:-]*) tid="$(hashkey "$tid")" ;; esac
+    [ -n "$tid" ] && rm -f -- "${subagents}/${sid}/${tid}.json" 2>/dev/null
     rmdir "${subagents}/${sid}" 2>/dev/null
     exit 0
     ;;
@@ -503,7 +577,7 @@ case "$phase" in
     done
     # covers any subagent that was still running when the session ended
     # (crashed/interrupted before its own PostToolUse/Task could fire)
-    rm -rf "${subagents}/${sid}" 2>/dev/null
+    rm -rf -- "${subagents:?}/${sid}" 2>/dev/null
     # drop our own inbox dir if drained; rmdir no-ops if it still holds
     # undelivered messages (leaving them for a possible late reader).
     rmdir "${inbox}/${sid}" 2>/dev/null
@@ -718,19 +792,20 @@ case "$phase" in
       local t rows col cany tany; t="$(now)"
       printf '%b🛰️  coordkit command center%b  %s  %b%s%b\n' "$BOLD" "$RST" "${root}" "$DIM" "$(iso)" "$RST"
       printf '%bLIVE AGENTS%b\n' "$CYN" "$RST"
-      local any=0 s last age br cwd task files state
+      local any=0 s ah last age br cwd task files state
       for f in "$agents"/*.json; do
         [ -e "$f" ] || continue
         last="$(jq -r '.last_seen // 0' "$f" 2>/dev/null)"; [ -z "$last" ] && last=0
         age=$(( t - last )); [ "$age" -gt "$STALE_HARD" ] && continue
         any=1
         s="$(jq -r '.sid // ""' "$f" 2>/dev/null)"
+        ah="$(jq -r '.host // "unknown"' "$f" 2>/dev/null)"
         br="$(jq -r '.branch // "?"' "$f" 2>/dev/null)"
         cwd="$(jq -r '.cwd // ""' "$f" 2>/dev/null)"
         task="$(jq -r '.task // "(no task yet)"' "$f" 2>/dev/null)"
         files="$(jq -r '(.files // []) | join(", ")' "$f" 2>/dev/null)"
         state="${GRN}live${RST}"; [ "$age" -gt "$STALE_SOFT" ] && state="${YEL}idle${RST}"
-        printf '  %b%s%b [%b, %ds]  branch:%b%s%b\n' "$BOLD" "${s:0:8}" "$RST" "$state" "$age" "$YEL" "$br" "$RST"
+        printf '  %b%s%b [host:%s, %b, %ds]  branch:%b%s%b\n' "$BOLD" "${s:0:8}" "$RST" "$ah" "$state" "$age" "$YEL" "$br" "$RST"
         [ -n "$cwd" ] && printf '      path:    %s\n' "$cwd"
         printf '      task:    %s\n' "$task"
         [ -n "$files" ] && printf '      %btouched:%b %s\n' "$DIM" "$RST" "$files"

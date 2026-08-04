@@ -52,7 +52,11 @@ Verbs:
 
 Setup / transport:
   init-git [room] [remote]    enable git-mode sharing for this repo
+  init-relay <url> [room]     configure an authenticated relay pointer (no token)
   sync                        replicate the git-mode log (run on a timer, not a hook)
+  relay-status                show relay endpoint, room, backing, replay cursor,
+                              pending outbox count, and auth presence
+  relay-sync                  flush the durable outbox and pull replayable events
   migrate                     append the v2 schema-upgrade marker (append-only)
   gc [--apply] [repo]         garbage-collect this repo's .coordkit-bus/ (dead
                               agents/claims/cursors, oversized activity.log).
@@ -73,7 +77,10 @@ esac
 # Setup/transport verbs route to their own scripts (not the ledger dispatch).
 case "${1:-}" in
   init-git) shift; exec bash "${ROOT}/scripts/init-git.sh" "$@" ;;
+  init-relay) shift; exec bash "${ROOT}/scripts/init-relay.sh" "$@" ;;
   sync)     shift; exec bash "${ROOT}/bin/sync.sh" "$@" ;;
+  relay-status) shift; exec bash "${ROOT}/scripts/relay-client.sh" status "$@" ;;
+  relay-sync)   shift; exec bash "${ROOT}/scripts/relay-client.sh" sync "$@" ;;
   migrate)  shift; exec bash "${ROOT}/scripts/migrate.sh" "$@" ;;
   gc)       shift; exec bash "${ROOT}/scripts/gc.sh" "$@" ;;
   fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;

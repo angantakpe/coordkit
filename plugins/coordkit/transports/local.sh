@@ -51,8 +51,13 @@ __local_readall() {
         | LC_ALL=C sort \
         | while IFS= read -r seg; do awk 1 "$seg" 2>/dev/null; done
     fi
-    # Legacy flat ledger, folded in last for backward-compat.
-    [ -f "$base/ledger.jsonl" ] && awk 1 "$base/ledger.jsonl" 2>/dev/null
+    # Legacy flat ledger, folded in last for backward-compat. Use an explicit
+    # conditional so a segment-only store still returns success under callers
+    # running with `set -o pipefail`; a trailing `[ -f ] && ...` made the
+    # productive pipeline look failed and caused ledger.sh to discard its view.
+    if [ -f "$base/ledger.jsonl" ]; then
+      awk 1 "$base/ledger.jsonl" 2>/dev/null
+    fi
   } | __dedup_by_eid | __total_order
 }
 

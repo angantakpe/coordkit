@@ -1,13 +1,15 @@
 {
+  "description": "CoordKit cross-host lifecycle hooks.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "session-start"],
-            "timeout": 10
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" session-start",
+            "timeout": 10,
+            "statusMessage": "Joining the CoordKit bus",
+            "additionalContextLimit": 800
           }
         ]
       }
@@ -17,15 +19,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "prompt-submit"],
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/skill-activation.sh"],
-            "timeout": 5
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" prompt-submit",
+            "timeout": 10,
+            "additionalContextLimit": 400
           }
         ]
       }
@@ -36,10 +32,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "pretool-write"],
-            "timeout": 5,
-            "statusMessage": "Checking for concurrent edits..."
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" pretool-write",
+            "timeout": 10,
+            "statusMessage": "Checking CoordKit file ownership",
+            "additionalContextLimit": 200
           }
         ]
       },
@@ -48,9 +44,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "pretool-bash"],
-            "timeout": 5
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" pretool-bash",
+            "timeout": 10
           }
         ]
       },
@@ -59,9 +54,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "pretool-task"],
-            "timeout": 5
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" pretool-task",
+            "timeout": 10
           }
         ]
       }
@@ -72,9 +66,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "posttool-write"],
-            "timeout": 5
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" posttool-write",
+            "timeout": 10
           }
         ]
       },
@@ -83,9 +76,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "posttool-bash"],
-            "timeout": 5
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" posttool-bash",
+            "timeout": 10
           }
         ]
       },
@@ -94,8 +86,30 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "posttool-task"],
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" posttool-task",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" subagent-start",
+            "timeout": 5,
+            "additionalContextLimit": 200
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" subagent-stop",
             "timeout": 5
           }
         ]
@@ -106,9 +120,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh", "session-end"],
-            "timeout": 5
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" session-end",
+            "timeout": 3
           }
         ]
       }

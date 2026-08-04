@@ -13,14 +13,14 @@
 #   logstore_readall                     emit ALL events (the UNION across every
 #                                        actor), newline-delimited, deterministically
 #                                        ordered + deduped, to stdout.
-#   logstore_since <watermark>           emit events STRICTLY AFTER <watermark> in the
-#                                        deterministic total order — for incremental
-#                                        context injection. <watermark> is a total-order
-#                                        key "p:c:actor" (see logstore_watermark). This
-#                                        is the correct incremental cursor: a late event
-#                                        that sorts before the watermark is simply "in
-#                                        the past" and excluded, never a source of
-#                                        shifted-position drops or duplicates.
+#   logstore_since_actor_cursors <json> [watermark]
+#                                        emit unseen events using per-actor clock.c
+#                                        cursors. This is the lossless incremental API
+#                                        for asynchronously arriving replica unions.
+#   logstore_actor_cursors               emit {actor:max_clock_c,...} for the union.
+#   logstore_since <watermark>           legacy total-order-key cursor. It cannot see a
+#                                        newly synced event that sorts before its global
+#                                        watermark; retained for compatibility.
 #   logstore_watermark                   echo the total-order key ("p:c:actor") of the
 #                                        LAST event, i.e. the watermark to pass to a
 #                                        subsequent logstore_since.
@@ -229,7 +229,7 @@ __total_order() {
 }
 
 # --------------------------------------------------------------------------- #
-# Watermark helpers — the correct incremental cursor over the total order.
+# Watermark helpers — deterministic positional compatibility cursor.
 #
 # A watermark is the total-order key of the last-seen event, encoded "p:c:actor"
 # (p and c are integers so the first two ':' are unambiguous field separators; the
@@ -237,8 +237,9 @@ __total_order() {
 # total-ordered stream and echoes the key of its LAST line. __filter_since keeps only
 # lines whose key is strictly greater than a given watermark, comparing (p,c) numeric
 # then actor lexicographically — the SAME order as __total_order. An empty or
-# unparseable watermark means "no cursor yet" and passes everything through (safe: it
-# can only over-deliver, never drop). Input is assumed already deduped + ordered.
+# unparseable watermark means "no cursor yet" and passes everything through. A
+# valid global watermark is not arrival-lossless for asynchronously synced
+# replicas; use the actor-cursor helpers below. Input is already ordered.
 # --------------------------------------------------------------------------- #
 __watermark_of() {
   jq -Rrn '
@@ -270,6 +271,51 @@ __filter_since() {
         or (.p == $w.p and .c == $w.c and .a > $w.a)
       ))
     | .[].raw
+  '
+}
+
+# A global total-order watermark cannot detect an event that arrives later but
+# sorts earlier (new offline actor, skewed wall clock). Per-actor clock.c is the
+# emitter's persistent monotonic counter, so a compact vector detects new work
+# regardless of clock.p or inter-replica arrival order. The legacy watermark is
+# consulted only for old envelopes without a usable actor/counter.
+__filter_since_actor_cursors() { # <actors-json> [legacy-watermark]
+  local actors="${1:-}" wm="${2:-}" normalized
+  [ -n "$actors" ] || actors='{}'
+  normalized="$(printf '%s' "$actors" | jq -c 'if type == "object" then . else {} end' 2>/dev/null)" || normalized='{}'
+  jq -Rrn --argjson seen "$normalized" --arg wm "$wm" '
+    ($wm | if . == "" then null
+           else (capture("^(?<p>[0-9]+):(?<c>[0-9]+):(?<a>.*)$") // null) end) as $legacy
+    | ($legacy | if . == null then null
+                 else {p:(.p|tonumber), c:(.c|tonumber), a:.a} end) as $legacy
+    | [inputs] | map(select(. != ""))
+    | map(. as $raw
+          | ($raw | (try fromjson catch null)) as $p
+          | (if ($p | type) == "object" then $p else {} end) as $o
+          | {raw:$raw, a:(($o.actor // "")|tostring),
+             p:($o.clock.p // 0), c:($o.clock.c // 0),
+             vector:(($o.actor|type)=="string" and ($o.actor|length)>0
+                     and ($o.clock.c|type)=="number")})
+    | map(select(
+        if .vector then .c > ($seen[.a] // -1)
+        else $legacy == null
+          or (.p > $legacy.p)
+          or (.p == $legacy.p and .c > $legacy.c)
+          or (.p == $legacy.p and .c == $legacy.c and .a > $legacy.a)
+        end))
+    | .[].raw
+  '
+}
+
+__actor_cursors_of() {
+  jq -Rrn '
+    reduce (inputs
+      | (try fromjson catch null)
+      | select(type=="object")
+      | select((.actor|type)=="string" and (.actor|length)>0)
+      | select((.clock.c|type)=="number")) as $e ({};
+        ($e.actor|tostring) as $a | ($e.clock.c|floor) as $c
+        | .[$a] = ([.[$a] // -1, $c] | max))
   '
 }
 
@@ -362,15 +408,24 @@ logstore_tail() {
   "__${COORDKIT_RESOLVED_MODE}_tail" "$n"
 }
 
-# logstore_since <watermark> — the correct incremental cursor. Emits every event
-# STRICTLY AFTER <watermark> in the deterministic total order, filtering the same
-# union readall produces (so it is mode-agnostic — the read path is identical in
-# every mode). An empty watermark returns the full union. See __filter_since /
-# logstore_watermark and the interface note above logstore_tail for why this is
-# loss-free where the positional tail is not.
+# logstore_since <watermark> — compatibility cursor. Emits every event strictly
+# after the key in the current deterministic union. Unlike positional tail it
+# does not shift, but an asynchronously arriving event whose key sorts before
+# the saved global watermark is invisible. New consumers should persist
+# logstore_actor_cursors and call logstore_since_actor_cursors.
 logstore_since() {
   local wm="${1:-}"
   logstore_readall | __filter_since "$wm"
+}
+
+logstore_since_actor_cursors() {
+  local actors="${1:-}" wm="${2:-}"
+  [ -n "$actors" ] || actors='{}'
+  logstore_readall | __filter_since_actor_cursors "$actors" "$wm"
+}
+
+logstore_actor_cursors() {
+  logstore_readall | __actor_cursors_of
 }
 
 # logstore_watermark — echo the total-order key ("p:c:actor") of the LAST event in

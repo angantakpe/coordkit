@@ -20,7 +20,7 @@
 # Active transport: "local" | "git" | "relay".
 #   local : same-machine only (default). Zero network, zero deps.
 #   git   : team async sharing over a plain git remote. No server, no daemon.
-#   relay : optional real-time fan-out cache on top of a durable backing (degraded).
+#   relay : authenticated near-real-time sharing with durable outbox + replay.
 mode = "local"
 
 # Logical coordination channel. All clones sharing a room see each other's events.
@@ -31,8 +31,11 @@ room_id = "default"
 # repo's existing default remote/branch. (No credentials here — git handles auth.)
 remote = ""
 
-# Relay mode: base URL of the fan-out relay (cache, NOT source of truth). Empty in
-# git/local mode. The relay token is supplied out-of-band via COORDKIT_RELAY_TOKEN.
+# Relay mode: full event endpoint, normally https://host/v1/events. The client
+# folds into its local/git backing first, then uses an on-disk outbox and cursor
+# replay. The token is supplied out-of-band via COORDKIT_RELAY_TOKEN.
+# Plaintext HTTP is rejected except for loopback development, which additionally
+# requires COORDKIT_RELAY_ALLOW_INSECURE_HTTP=1 in the client's environment.
 relay_url = ""
 
 # Wire/protocol version of the event envelope. Kept in lock-step with
@@ -69,3 +72,42 @@ min_reader = "2.0"
 # `enforcement=guard` in $COORDKIT_DATA/config. Toggle with /guard on|off.
 [enforcement]
 mode = "warn"
+
+# MODEL-CONTEXT BUDGETS — bounds for automatic hook injection. These affect
+# what CoordKit puts into the model prompt, not what remains available in the
+# append-only ledger or the on-demand dashboard. Positive-integer environment
+# overrides use the same names prefixed with COORDKIT_CONTEXT_, for example
+# COORDKIT_CONTEXT_SESSION_START_TOKENS=400. Invalid values fall back to this
+# table and then to the built-in defaults shown here.
+[context]
+# "quiet" emits only urgent/actionable coordination, "compact" is the bounded
+# default, and "debug" disables repeat suppression while keeping hard safety
+# limits. COORDKIT_CONTEXT_MODE overrides this value.
+mode = "compact"
+
+# Hook-level token estimates use bytes_per_token; this is a cheap deterministic
+# governor, not a provider tokenizer. Broader on-demand views stay available via
+# $coordkit, /ctx, or `cobus digest`.
+session_start_tokens = 160
+prompt_tokens = 96
+collision_tokens = 64
+bytes_per_token = 4
+
+# Per-digest candidate caps. Omitted counts are summarized and retrievable on
+# demand instead of being discarded from the underlying coordination state.
+max_tasks = 2
+max_decisions = 1
+max_questions = 1
+max_events = 3
+max_messages = 2
+max_peers = 1
+event_body_chars = 80
+
+# Suppress an unchanged automatic context payload for this many seconds.
+# Direct on-demand commands always return current data.
+repeat_ttl_seconds = 3600
+
+# Keep local observability bounded; rotation preserves one previous file. Skill
+# auto-activation suggests only the highest-ranked matches per prompt.
+metrics_max_bytes = 262144
+skill_top_k = 1

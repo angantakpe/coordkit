@@ -64,6 +64,217 @@ ck_session_id() {
   printf 'cli'
 }
 
+# Repo-scoped identity is the cheap boundary check that should happen before any
+# semantic memory lookup. Keep it deterministic and local: exact repo root /
+# remote / package metadata are the admission signals; current path and task
+# keywords are carried along for downstream ranking, not for cross-repo access.
+ck_repo_package_name() {
+  local root="${1:-$(resolve_root "$PWD")}" pkg=""
+  if [ -f "$root/package.json" ] && command -v jq >/dev/null 2>&1; then
+    pkg="$(jq -r '.name // empty' "$root/package.json" 2>/dev/null)"
+  fi
+  [ -n "$pkg" ] || pkg="${root##*/}"
+  printf '%s' "$pkg"
+}
+
+ck_repo_remote_urls() {
+  local root="${1:-$(resolve_root "$PWD")}" url out=""
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    case "$url" in
+      *.git) url="${url%.git}" ;;
+    esac
+    url="${url%/}"
+    out+="${out:+
+}$url"
+  done < <(git -C "$root" remote -v 2>/dev/null \
+    | awk '$3 ~ /^\((fetch|push)\)$/ {print $2}' \
+    | sed -E 's#\.git$##; s#/*$##' \
+    | awk 'NF && !seen[$0]++')
+  printf '%s' "$out"
+}
+
+ck_repo_keyword_list() {
+  printf '%s' "${1:-}" \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr -cs 'a-z0-9' '\n' \
+    | awk 'length($0) >= 3 && !seen[$0]++'
+}
+
+ck_repo_identity_json() { # <cwd> [task-text]
+  local cwd="${1:-$(ck_project_dir)}" task="${2:-}" root rel pkg remotes keywords
+  root="$(resolve_root "$cwd")"
+  rel="${cwd#"$root"/}"
+  [ "$rel" = "$cwd" ] && rel="."
+  pkg="$(ck_repo_package_name "$root")"
+  remotes="$(ck_repo_remote_urls "$root" | jq -Rsc 'split("\n") | map(select(length > 0))' 2>/dev/null || printf '[]')"
+  keywords="$(ck_repo_keyword_list "$task" | jq -Rsc 'split("\n") | map(select(length > 0))' 2>/dev/null || printf '[]')"
+  jq -nc --arg root "$root" --arg cwd "$cwd" --arg cwd_rel "$rel" --arg pkg "$pkg" \
+    --argjson remotes "$remotes" --argjson keywords "$keywords" \
+    '{root:$root,cwd:$cwd,cwd_rel:$cwd_rel,workspace:$pkg,git_remotes:$remotes,task_keywords:$keywords}'
+}
+
+ck_repo_memory_gate() { # <candidate-json> [cwd] [task-text]
+  local candidate="${1:-}" cwd="${2:-$(ck_project_dir)}" task="${3:-}"
+  local root pkg rel candidate_root candidate_workspace candidate_path candidate_paths
+  local current_remotes candidate_remotes remote_hit path_hit candidate_path_abs
+  root="$(resolve_root "$cwd")"
+  pkg="$(ck_repo_package_name "$root")"
+  rel="${cwd#"$root"/}"
+  [ "$rel" = "$cwd" ] && rel="."
+  current_remotes="$(ck_repo_remote_urls "$root")"
+
+  candidate_root="$(printf '%s' "$candidate" | jq -r '.repo_root // .root // empty' 2>/dev/null)"
+  [ "$candidate_root" = "$root" ] && return 0
+
+  candidate_workspace="$(printf '%s' "$candidate" | jq -r '.workspace // .package // .package_name // empty' 2>/dev/null)"
+  candidate_remotes="$(printf '%s' "$candidate" | jq -r '
+    def arr($v):
+      if ($v|type) == "array" then [$v[] | select(type == "string" and length > 0)]
+      elif ($v|type) == "string" and length > 0 then [$v]
+      else []
+      end;
+    [arr(.git_remote), arr(.remote), arr(.git_remotes), arr(.remotes)] | add | unique[]
+  ' 2>/dev/null | sed -E 's#\.git$##; s#/*$##')"
+  remote_hit=0
+  if [ -n "$current_remotes" ] && [ -n "$candidate_remotes" ]; then
+    while IFS= read -r candidate_path; do
+      [ -n "$candidate_path" ] || continue
+      while IFS= read -r current_path; do
+        [ -n "$current_path" ] || continue
+        [ "$candidate_path" = "$current_path" ] && remote_hit=1
+      done <<< "$current_remotes"
+    done <<< "$candidate_remotes"
+  fi
+  [ "$remote_hit" -eq 1 ] && return 0
+
+  candidate_paths="$(printf '%s' "$candidate" | jq -r '
+    def arr($v):
+      if ($v|type) == "array" then [$v[] | select(type == "string" and length > 0)]
+      elif ($v|type) == "string" and length > 0 then [$v]
+      else []
+      end;
+    [arr(.paths), arr(.path), arr(.current_paths), arr(.cwd_rel)] | add | unique[]
+  ' 2>/dev/null)"
+  path_hit=0
+  if [ -n "$candidate_paths" ]; then
+    while IFS= read -r candidate_path_abs; do
+      [ -n "$candidate_path_abs" ] || continue
+      case "$candidate_path_abs" in
+        "$root"|"$root"/*|"$cwd"|"$cwd"/*) path_hit=1 ;;
+      esac
+      [ "$path_hit" -eq 1 ] && break
+    done <<< "$candidate_paths"
+  fi
+
+  if [ "$path_hit" -eq 1 ] && [ -n "$candidate_workspace" ]; then
+    [ "$candidate_workspace" = "$pkg" ] && return 0
+  fi
+
+  # When the candidate is scoped to a concrete on-disk path inside this repo,
+  # path overlap is enough. Otherwise stay conservative and drop it.
+  [ "$path_hit" -eq 1 ]
+}
+
+# Stable display identity for the host driving this runtime. Adapters SHOULD set
+# COORDKIT_HOST explicitly because compatibility variables can overlap (Codex,
+# for example, also exposes CLAUDE_PLUGIN_ROOT for plugin-hook compatibility).
+ck_host() {
+  local h="${COORDKIT_HOST:-}"
+  case "$h" in
+    claude|claude-code) printf 'claude-code'; return ;;
+    codex)              printf 'codex'; return ;;
+    gemini)             printf 'gemini'; return ;;
+    cli)                printf 'cli'; return ;;
+  esac
+  [ -n "${CODEX_SESSION_ID:-}" ]  && { printf 'codex'; return; }
+  [ -n "${GEMINI_SESSION_ID:-}" ] && { printf 'gemini'; return; }
+  [ -n "${CLAUDE_SESSION_ID:-}" ] && { printf 'claude-code'; return; }
+  # Claude Code hook payloads carry session_id on stdin and do not guarantee a
+  # CLAUDE_SESSION_ID environment variable. Its plugin root is therefore the
+  # reliable final adapter signal. Codex also exposes this compatibility name,
+  # but the Codex wrapper above always sets COORDKIT_HOST first.
+  [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && { printf 'claude-code'; return; }
+  printf 'cli'
+}
+
+# Print at most N UTF-8 bytes without leaving a partial multibyte sequence.
+# The fast path returns the original text without spawning a decoder; Python or
+# iconv is used only when truncation is actually necessary.
+ck_utf8_prefix_bytes() { # <text> <max-bytes>
+  local value="$1" max="$2" bytes
+  case "$max" in ''|*[!0-9]*) max=0 ;; esac
+  [ "$max" -gt 0 ] || return 0
+  bytes="$(printf '%s' "$value" | wc -c | tr -d ' ')"
+  case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+  if [ "$bytes" -le "$max" ]; then printf '%s' "$value"; return 0; fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$value" | python3 -c \
+      'import sys; n=int(sys.argv[1]); b=sys.stdin.buffer.read()[:n]; sys.stdout.write(b.decode("utf-8", "ignore"))' \
+      "$max" 2>/dev/null
+  elif command -v iconv >/dev/null 2>&1; then
+    printf '%s' "$value" | LC_ALL=C cut -c1-"$max" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null
+  else
+    printf '%s' "$value" | LC_ALL=C cut -c1-"$max"
+  fi
+}
+
+# Human-facing command hint for hook messages. Keep host detection independent
+# from branding or application names: renaming an app must not change either
+# identity or the command surface that a hook recommends.
+ck_coordination_hint() { # [target sid8]
+  local target="${1:-<sid8>}"
+  case "$(ck_host)" in
+    codex)       printf 'Use $coordkit to inspect the bus or message %s.' "$target" ;;
+    claude-code) printf 'Run /bus to inspect the bus or /msg %s to coordinate.' "$target" ;;
+    *)           printf 'Run cobus digest, or bus.sh msg %s, to coordinate.' "$target" ;;
+  esac
+}
+
+ck_digest_command() {
+  case "$(ck_host)" in
+    codex)       printf '$coordkit' ;;
+    claude-code) printf '/ctx' ;;
+    *)           printf 'cobus digest' ;;
+  esac
+}
+
+ck_ledger_hint() {
+  case "$(ck_host)" in
+    codex)       printf 'use $coordkit to write or inspect shared context' ;;
+    claude-code) printf 'write: /led note|decide|task|claim|done · take work: /led next · full view: /ctx' ;;
+    *)           printf 'use cobus note|decide|task|claim|done|next|digest' ;;
+  esac
+}
+
+# Atomically set one flat key before the first TOML table. Transport setup must
+# never rewrite a same-named key such as [enforcement].mode later in the file.
+ck_toml_set_top() { # <file> <key> <string-value>
+  local file="$1" key="$2" value="$3" rendered tmp
+  case "$key" in ""|*[!A-Za-z0-9_]*) return 1 ;; esac
+  [ -f "$file" ] || return 1
+  rendered="$(printf '%s' "$value" | jq -Rs . 2>/dev/null)" || return 1
+  tmp="${file}.tmp.$$"
+  CK_TOML_KEY="$key" CK_TOML_RENDERED="$rendered" awk '
+    BEGIN {
+      key=ENVIRON["CK_TOML_KEY"]; rendered=ENVIRON["CK_TOML_RENDERED"]
+      in_table=0; done=0; pattern="^[[:space:]]*" key "[[:space:]]*="
+    }
+    !in_table && /^[[:space:]]*\[/ {
+      if (!done) { print key " = " rendered; done=1 }
+      in_table=1
+    }
+    !in_table && $0 ~ pattern {
+      if (!done) { print key " = " rendered; done=1 }
+      next
+    }
+    { print }
+    END { if (!done) print key " = " rendered }
+  ' "$file" > "$tmp" 2>/dev/null && mv -f "$tmp" "$file" 2>/dev/null \
+    || { rm -f "$tmp" 2>/dev/null; return 1; }
+}
+
 ck_coord_dir() {
   local root="${1:-$(resolve_root "$PWD")}"
   if ck_first_env COORDKIT_COORD_DIR CLAUDE_COORD_DIR CODEX_COORD_DIR GEMINI_COORD_DIR; then return 0; fi

@@ -1,0 +1,39 @@
+{
+  "name": "coordkit",
+  "version": "5.0.0+codex.20260803210439",
+  "description": "Coordinate concurrent Codex and Claude Code sessions with a shared bus, ledger, anti-clobber guard, and optional cross-machine relay.",
+  "author": {
+    "name": "codehornets",
+    "email": "codehornets@gmail.com",
+    "url": "https://github.com/angantakpe"
+  },
+  "repository": "https://github.com/angantakpe/coordkit",
+  "license": "MIT",
+  "keywords": [
+    "coordination",
+    "multi-agent",
+    "concurrency",
+    "ledger",
+    "anti-clobber",
+    "relay"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "CoordKit",
+    "shortDescription": "Coordinate parallel coding sessions safely.",
+    "longDescription": "Shared session awareness, file collision warnings, durable decisions and tasks, optional hard anti-clobber enforcement, and authenticated cross-machine relay synchronization.",
+    "developerName": "codehornets",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Show live CoordKit sessions and collision risks.",
+      "Show the shared CoordKit task board.",
+      "Check CoordKit guard and relay status."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

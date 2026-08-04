@@ -9,9 +9,10 @@ packaging format, environment variables, and command surface onto that core.
 
 Adapter status in this repository:
 
-- `claude-code/` - shipped adapter, backed by the current Claude plugin
+- `claude-code/` - shipped adapter, backed by the Claude plugin
   manifest and hook wiring.
-- `codex/` - scaffolded adapter slot for a Codex host integration.
+- `codex/` - shipped adapter, backed by `.codex-plugin/plugin.json`, Codex
+  lifecycle hooks, and the bundled `$coordkit` skill.
 - `gemini/` - scaffolded adapter slot for a Gemini host integration.
 
 These adapter directories are intentionally small. They exist to keep host-

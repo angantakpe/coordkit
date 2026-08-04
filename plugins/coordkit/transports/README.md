@@ -22,7 +22,7 @@ ledger scripts ─► logstore_append / logstore_readall / logstore_tail / logst
 |-------|--------------------|-------------------------------|-------------|-----------------|
 | local | same machine only  | per-actor files on local disk | none        | local segments  |
 | git   | team, asynchronous | committed segments + git push | git         | committed log   |
-| relay | team, real-time    | fan-out POST over a durable backing | curl + backing | the **backing** (local/git), never the relay |
+| relay | team, near-real-time | authenticated POST + cursor replay | curl + backing + relay server | local/git backing plus server replay log |
 
 - **local** (default): exactly today's same-machine behaviour. Each actor appends to
   its own `.coordkit-bus/log/<actor>/seg.ndjson`; `readall` is the union of all those
@@ -39,8 +39,10 @@ ledger scripts ─► logstore_append / logstore_readall / logstore_tail / logst
   no structural conflicts; `*.ndjson merge=union` (committed on the log branch) is a
   backstop only. Only the secret-free pointer (`coord.toml`, `.gitattributes`,
   `MANIFEST.json`) is committed on your branch.
-- **relay**: an optional real-time fan-out **cache** on top of a durable backing
-  (local or git). Currently a degraded stub — see caveats.
+- **relay**: an authenticated delivery accelerator on top of a durable local or
+  git backing. Appends are staged in an on-disk outbox, POSTed with acknowledgement,
+  and replayed from a server cursor before reads. A dependency-free reference
+  server is bundled under `relay/` at the repository root.
 
 ## Graceful degradation: relay → git → local (each a no-op cutover)
 
@@ -48,13 +50,20 @@ Because every mode reconstructs state from the **union of events**, dropping dow
 level changes nothing a reader can observe — only delivery latency and reach.
 
 ```
-relay down ─► git   : stop fanning out; events still replicate on the next git sync.
+relay down ─► git   : queue in the outbox; events also replicate on the next git sync.
 git down   ─► local : stop pushing; events still recorded locally, shared later.
 ```
 
 Concretely:
-- The **relay** adapter folds every event into its durable backing **before** the
-  best-effort POST. A POST failure is non-fatal — the event is already persisted.
+- The **relay** adapter folds every event into its durable backing **before**
+  staging an outbox record. A POST failure is non-fatal and retryable; the next
+  append, read, or `cobus relay-sync` flushes pending records.
+- Relay reads pull authenticated NDJSON pages after the last locally committed
+  server cursor. The cursor advances only after every returned event has been
+  folded into the backing, so a crash replays rather than drops the page. Server
+  deduplication by `eid` makes retries safe. If a restored/replaced server
+  reports a lower latest cursor, the client rewinds and safely replays instead
+  of remaining stuck beyond the server's new sequence.
 - If the durable fold itself fails, `lib.sh` retries **the configured backing FIRST**
   (`COORDKIT_RELAY_BACKING`, default `local`) and only then spills to the other stores.
   This ordering matters: relay-mode **reads come from the backing**, so spilling to a
@@ -97,17 +106,43 @@ Going multi-machine relaxes guarantees that hold trivially on one box. Be explic
   activity stream, which never replicates — see the privacy rule). A remote holder's
   liveness can't be observed directly; only the TTL bounds how long a dead holder
   blocks others.
-- **Eventual, not immediate, consistency** in git mode: peers converge on the next
-  debounced sync, not instantly. relay narrows this window but, as a cache, never
-  makes it zero or authoritative.
+- **Eventual, not immediate, consistency.** Git peers converge on the next
+  debounced sync. Relay peers converge on their next hook/read/sync pull. The
+  server acknowledges durable receipt, but it does not turn task claims into a
+  distributed mutex.
 
-## Incremental reads: prefer `logstore_since`, not `logstore_tail`
+## Relay deployment and authentication
 
-- `logstore_since <watermark>` is the **correct** incremental cursor. A watermark is the
-  total-order key `p:c:actor` of the last-seen event (`logstore_watermark` computes it);
-  `since` emits only events **strictly after** it. A late-arriving event that sorts before
-  the watermark is simply "in the past" and excluded — never a cause of dropped or
-  duplicated events.
+Run `relay/server.mjs` with Node 20+ or build `relay/Dockerfile`. Require either
+`COORDKIT_RELAY_TOKEN` or a `COORDKIT_RELAY_TOKENS` JSON map of token to allowed
+rooms. The server binds to loopback by default and should sit behind an HTTPS
+reverse proxy for cross-machine use. Clients keep tokens in the environment,
+never in committed `coord.toml`.
+
+The client refuses every non-loopback plaintext HTTP URL, even when insecure
+mode is requested. Loopback HTTP is for local development only and additionally
+requires `COORDKIT_RELAY_ALLOW_INSECURE_HTTP=1`; HTTPS needs no opt-in. URL
+validation happens before the temporary bearer-header file is created or curl
+is invoked.
+
+The server provides durable fsynced append, per-room bearer authorization,
+`eid` deduplication with conflicting-content rejection, cursor pagination,
+validated acknowledgement, and optional long polling. It enforces a single
+process per data directory. See
+`relay/README.md` for deployment settings.
+
+## Incremental reads: use per-actor cursors
+
+- `logstore_actor_cursors` returns a compact JSON map of each actor to its
+  highest persistent monotonic `clock.c`. Save it, then call
+  `logstore_since_actor_cursors <json> [legacy-watermark]`. A newly synced actor
+  or a higher counter is detected even when wall-clock skew makes its event sort
+  before the previous global watermark. CoordKit's automatic ledger context
+  uses this API.
+- `logstore_since <watermark>` is retained for compatibility. Its total-order
+  key `p:c:actor` is stable, but a newly arriving event that sorts before that
+  one global key cannot be detected. The optional legacy watermark in the actor
+  API applies only to old envelopes without a usable actor/counter.
 - `logstore_tail <n>` is **legacy and lossy**. It counts `n` events into the total order,
   but that order is recomputed on every call, so a late event that sorts earlier shifts
   positions and the count-based boundary can skip a real event or re-emit one. Kept only

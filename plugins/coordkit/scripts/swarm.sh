@@ -164,7 +164,7 @@ worker() {
         bash -c "$cmd"
         rc=$?
         if [ "$rc" -eq 0 ]; then
-          bash "$LEDGER" done "$subj" >/dev/null 2>&1
+          bash "$LEDGER" "done" "$subj" >/dev/null 2>&1
           printf '%s\n' "$subj" >> "$donefile"
           printf '[worker %d] done: %s\n' "$id" "$subj"
         else

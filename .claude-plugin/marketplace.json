@@ -5,13 +5,13 @@
     "name": "codehornets",
     "email": "codehornets@gmail.com"
   },
-  "description": "Claude Code orchestration: a shared bus + ledger that warns about concurrent edits and tracks running subagents, with an opt-in hard anti-clobber guard and skill auto-activation built in (coordkit). coordguard was merged into coordkit at 3.0.0, and skillkit was merged in at 4.0.0 — both are no longer separate entries in this marketplace.",
+  "description": "Multi-host coding-agent coordination with shipped Claude Code and Codex adapters, a shared bus and ledger, an authenticated replayable relay, and an opt-in hard anti-clobber guard.",
   "plugins": [
     {
       "name": "coordkit",
       "source": "./plugins/coordkit",
-      "description": "Same-machine coordination bus + cross-instance ledger + skill auto-activation, plus an opt-in hard anti-clobber guard (merged in from coordguard at 3.0.0). WARN-only by default: tracks who else is live in a repo, which files they touch, and which subagents they're running, and surfaces it — never blocks a tool call. Run /guard on to enable guard mode, which additionally denies a Write/Edit when the target file changed on disk since this session last read it. Also matches prompts against layered skill-rules.json files to suggest skills, and ships a shared roster of specialized agents and /dev-docs commands (merged in from skillkit at 4.0.0).",
-      "version": "4.2.0",
+      "description": "Claude Code and Codex coordination bus, durable shared ledger, host-attributed collision warnings, authenticated relay replay, skill workflows, and opt-in hard anti-clobber enforcement. Warn-only by default.",
+      "version": "5.0.0",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"

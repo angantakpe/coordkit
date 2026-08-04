@@ -6,8 +6,8 @@ heartbeats (`.coordkit-bus/agents/<sid>.json`) to decide whether a session is
 still alive, but it answers a different question. The bus tells you *who else
 is here and what they're touching*; the ledger gives every instance **one
 shared, append-only source of truth** — decisions, notes, questions, and a
-self-orchestrating task queue — that all of them read a paginated slice of on
-every turn.
+self-orchestrating task queue — that instances receive as bounded, change-driven
+context or inspect explicitly on demand.
 
 ## 1. Storage: one JSON event per line, never edited
 
@@ -17,16 +17,15 @@ mode, to this machine's own actor-partitioned segment file — see
 only appended. Each event carries:
 
 ```
-{schema_version, eid, id, actor, clock, seq, ts, sid, sid8, user, branch,
+{schema_version, eid, id, actor, clock, seq, ts, sid, sid8, host, user, branch,
  type, subject, body, refs, tags, lease, supersedes, sig}
 ```
 
 The full field-by-field contract lives in
 `plugins/coordkit/schema/event.schema.json` — read that file for the
 authoritative, currently-accurate description of what's implemented vs.
-reserved for later (`sig`, `supersedes`, and the `clock`-based cross-machine
-ordering are all explicitly marked as **not yet implemented** there; don't
-trust older prose elsewhere that implies otherwise).
+reserved for later (`sig` and `supersedes` remain reserved; the documented
+`clock`-based transport ordering is live for shared modes).
 
 `type` is one of `note | decision | question | answer | task | claim | done |
 block` (readers tolerate unknown types as opaque notes, so this isn't a
@@ -40,12 +39,15 @@ class of bug possible.
 
 **Ordering, honestly**: in the shipped default (direct/local mode), the log is
 read in **local `seq` order** — `seq` is a plain per-physical-log integer,
-correct and sufficient for a single append-only file. The schema also defines
-a `clock` field (`{p: wall-ms, c: monotonic counter}`) intended for a future
-machine-independent total order across replicas (`sort by (clock.p, clock.c,
-actor)`) for git/relay sharing — but the *read path* doesn't use it yet; the
-schema file says so explicitly. Don't design around cross-machine clock
-ordering being live today.
+correct and sufficient for a single append-only file. Git and relay modes read
+the deduplicated replica union in stable `(clock.p, clock.c, actor)` order.
+Sessions persist a compact `{actor: max_clock.c}` cursor vector, plus the global
+watermark only for legacy-envelope compatibility. The vector detects a newly
+synced actor even when clock skew places its event before the old global key.
+Ledger projections reconcile by the resulting stream position, never by a
+replica-local `seq`, so a newly received event with a lower `seq` is not lost.
+`clock.p` is still unsynchronised wall time rather than a reconciled Lamport
+clock, so cross-machine last-writer-wins remains subject to clock skew.
 
 ## 2. The task queue — leases, auto-claim, work-stealing
 
@@ -160,40 +162,61 @@ queue in the first place (same machine, or an explicitly `cobus trust`-ed
 git-mode repo), but don't point `COORDKIT_SWARM_CMD` at anything you wouldn't
 run with arbitrary task-description text as input.
 
-## 3. Pagination — what actually reaches your context
+## 3. Context governor — what actually reaches your context
 
-Reading the *entire* ledger on every turn doesn't scale and would flood every
-prompt with history nobody needs. Instead:
+Reading the entire ledger on every turn does not scale. The ledger therefore
+projects current state, coalesces repeated lifecycle changes, ranks candidates,
+and packs a bounded page instead of replaying raw history:
 
-- **`SessionStart`** (`ledger.sh start`): computes the small
-  *materialized state* (open/claimed/blocked tasks, the 5 most recent
-  decisions, any open questions) — always included, it's cheap — then adds
-  events strictly newer than this session's cursor (`cursors/<sid>.json`,
-  capped at `PAGE=20` events, each body truncated to `BODYCAP=240` chars). A
-  brand-new session starts its cursor one page back (not at zero), so it gets
-  recent context instead of either nothing or the entire history.
-- **`UserPromptSubmit`** (`ledger.sh prompt`): injects only the delta
-  from *other* instances since your last turn, then advances your cursor.
-  You never see your own writes echoed back.
-- Cursors for sessions whose bus heartbeat is long gone get pruned
-  automatically (`prune_cursors()`, called from `ensure_dirs()`) — they used
-  to accumulate forever; this was closed in a hardening pass.
+- Tasks, decisions, and questions are projected to the latest event for each
+  subject. In deltas, the latest task lifecycle, decision, and question/answer
+  for a subject wins; independent notes remain distinct.
+- Delta candidates are ranked by actionable type (`block`, `done`, `claim`,
+  `answer`, `decision`, `question`, `task`, then `note`) and recency.
+- On `UserPromptSubmit`, if the hook carries prompt text, the ledger adds a
+  query-aware relevance pass before the token budget is applied. Prompt terms
+  can lift an older but directly relevant event ahead of newer noise, while the
+  no-prompt path keeps the existing salience order.
+- The default page contains at most 5 tasks, 3 decisions, 3 questions, and 8
+  events, with event bodies capped at 120 characters. Every truncated category
+  reports `+N more` and points to the host's on-demand command.
+- The final automatic `additionalContext`, including the untrusted-data safety
+  frame, is hard-capped at an estimated 600 tokens on `SessionStart` and 250 on
+  `UserPromptSubmit`. The estimator defaults to 4 UTF-8 bytes per token.
 
-`/ctx` gives you the full un-paginated digest by hand at any time; `/led
-digest` (alias `catchup`) is the same thing from the ledger's own CLI.
+`SessionStart` computes the bounded materialized state plus events newer than
+the session cursor. A brand-new session starts one page back, so it receives
+recent context rather than the entire history. `UserPromptSubmit` includes only
+the coalesced delta from other instances and advances the cursor; an instance's
+own writes are not echoed back. Direct mode stores a local `seq` cursor; shared
+git/relay mode stores that compatibility value, the total-order watermark, and
+the authoritative per-actor cursor vector. Cursors whose bus heartbeat is
+hard-stale are pruned automatically.
+
+Configure the limits in `[context]` or with
+`COORDKIT_CONTEXT_SESSION_START_TOKENS`, `COORDKIT_CONTEXT_PROMPT_TOKENS`,
+`COORDKIT_CONTEXT_BYTES_PER_TOKEN`, `COORDKIT_CONTEXT_MAX_TASKS`,
+`COORDKIT_CONTEXT_MAX_DECISIONS`, `COORDKIT_CONTEXT_MAX_QUESTIONS`,
+`COORDKIT_CONTEXT_MAX_EVENTS`, and `COORDKIT_CONTEXT_EVENT_BODY_CHARS`.
+Environment values must be positive integers; invalid values fall back to TOML
+and then to the built-in defaults.
+
+`/ctx`, `$coordkit`, and `cobus digest` provide an explicit catch-up view, but
+the digest itself remains bounded so a one-off inspection cannot accidentally
+flood context. Use the projected task board or narrower ledger operations when
+you need more detail about an omitted category. The append-only ledger remains
+complete on disk; context selection never deletes history.
 
 ## 4. The trust gate — why a cloned repo can't just talk to your model
 
-A **committed** `coord.toml` can select `mode = "git"`, which flips a repo
-into reading `coord/log/**/*.ndjson` files as its ledger when the runtime is
-pointed there by `COORDKIT_COORD_TOML` or `COORDKIT_COORD_DIR` (the legacy
-`CLAUDE_*` names still work too). That is by design, so a fresh `git clone`
-auto-joins a team's shared coordination room with zero setup. The problem:
-nothing stops a *hostile* repo from also committing fabricated `.ndjson` event
-files there. Without a gate, cloning such a repo would inject the attacker's
-fake "decisions" and "tasks" into your context at `SessionStart`, before you'd
-typed a single word — and `next` would auto-claim and hand the model an
-attacker-authored task body as if it were legitimate.
+A **committed** `coord.toml` can select `mode = "git"` or `mode = "relay"`,
+which makes the runtime read shared coordination events from Git or a remote
+endpoint. That is by design, so a trusted fresh clone can auto-join a team's
+room with zero transport setup. The problem: a hostile repo could point at an
+attacker-controlled stream or commit fabricated `.ndjson` events. Without a
+gate, opening it could inject fake "decisions" and "tasks" into context at
+`SessionStart`, before you'd typed a single word — and `next` could auto-claim
+an attacker-authored task body as if it were legitimate.
 
 So: a committed `coord.toml` selecting git/relay mode is **not enough** to
 auto-activate log reads on its own. The repo also has to be explicitly
@@ -234,8 +257,8 @@ a second layer of defense for the git-mode case.
 
 ## 5. Transports
 
-Local mode (the default) reads/writes a single flat `ledger.jsonl` directly —
-zero dependencies, zero network. Git mode and the stubbed relay mode sit
+Local mode (the default) reads/writes actor segments plus the legacy flat
+`ledger.jsonl` — zero network. Git mode and the authenticated relay mode sit
 behind a shared `logstore_*` interface in `transports/lib.sh`; see
 `plugins/coordkit/transports/README.md` for how those work. The important
 property for the ledger's own logic: **the read path is identical regardless
@@ -255,7 +278,7 @@ shell, since `bin/cobus` forwards anything it doesn't special-case straight to
 the ledger):
 
 ```
-digest | catchup      full paginated digest
+digest | catchup      bounded projected digest with omission hints
 board                 the projected task queue
 note "<text>"         drop a durable note
 decide <subj> "<t>"   record a decision (latest per subject wins)

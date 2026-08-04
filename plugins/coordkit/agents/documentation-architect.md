@@ -31,7 +31,8 @@ You are a documentation architect specializing in creating comprehensive, develo
 **Methodology:**
 
 1. **Discovery Phase**:
-   - Query memory MCP for relevant stored information
+   - First run the repo memory gate and only query memory MCP for candidates
+     that match the active repository scope
    - Scan `/documentation/` and subdirectories for existing docs
    - Identify all related source files and configuration
    - Map out system dependencies and interactions

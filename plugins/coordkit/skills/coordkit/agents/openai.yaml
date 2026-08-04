@@ -1,0 +1,4 @@
+interface:
+  display_name: "CoordKit"
+  short_description: "Coordinate parallel Codex sessions safely"
+  default_prompt: "Use $coordkit to show live sessions and collision risks."

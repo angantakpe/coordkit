@@ -1,16 +1,16 @@
 # coordkit
 
-A host-adapter marketplace for same-machine, multi-instance coordination. It
+A host-adapter marketplace for multi-instance coding-agent coordination. It
 packages a working coordination core so it becomes installable, shareable, and
 semver-versioned instead of a hand-wired set of host-specific hook scripts.
-This repository currently ships the Claude Code adapter, as a single plugin
-named `coordkit`.
+This repository ships Claude Code and Codex adapters as one plugin named
+`coordkit`, plus an optional authenticated relay server for cross-machine use.
 
 It ships **one plugin**:
 
 | Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **coordkit** | 4.2.0   | **WARN-only by default; opt-in HARD guard via `/guard on`** | A per-repo bus + cross-instance ledger + an anti-clobber guard + skill auto-activation. Tracks who else is live in a repo, which files they touch, and which subagents they're running, and surfaces it so parallel sessions can reconcile instead of stepping on each other and duplicating work — and, where you ask for it, *denies* an edit that would clobber theirs. Also matches prompts against layered `skill-rules.json` trigger rules (global `~/.claude/skills` + per-project) and injects "use this skill" reminders, and ships a shared roster of specialized agents and the `/dev-docs` context-persistence commands. |
+| **coordkit** | 5.0.0   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. Claude Code gets slash commands and skill activation; Codex gets native lifecycle hooks and the `$coordkit` skill. |
 
 > **`coordguard` and `skillkit` have both been merged in.** Through 2.x, the
 > hard anti-clobber blocker shipped as a separate `coordguard` package. As of
@@ -32,12 +32,11 @@ under the hood:
   the age-aware collision warning, messaging, the statusline badge.
 - **[docs/LEDGER.md](docs/LEDGER.md)** — the shared-context layer: the
   event-sourcing model, the task queue (leases, auto-claim, work-stealing),
-  pagination/digests, and the git-mode trust gate.
-- **[docs/STATUSLINE.md](docs/STATUSLINE.md)** — the statusline badge: what it
-  shows, why a plugin manifest can never wire it, and how to keep it wired.
+  pagination/digests, and the non-local transport trust gate.
+- **[docs/STATUSLINE.md](docs/STATUSLINE.md)** — the Claude statusline badge:
+  what it shows, why a manifest cannot wire it, and how to keep it wired.
 - **[docs/HOSTS.md](docs/HOSTS.md)** — the host/adapter split: what belongs to
-  the shared coordination core, what stays adapter-specific, and what is still
-  Claude-only today.
+  the shared coordination core and what stays adapter-specific.
 - **[Enforcement modes](#enforcement-modes)** (below) — the guard layer: what
   `warn` vs `guard` mode actually do, how the mode is resolved, and the honest
   version of the safety story now that both live in one plugin.
@@ -48,14 +47,68 @@ coordkit's coordination core is host-neutral. A host adapter is the thin layer
 that maps a specific host's lifecycle events, environment variables, command
 surface, and packaging conventions onto the shared bus, ledger, and guard.
 
-The Claude Code adapter is the one shipped in this repository today. Its
-`CLAUDE_*` variables, `.claude/` paths, and slash-command wiring are adapter
-details, not requirements of the coordination model itself. The runtime now
-accepts `COORDKIT_*`, `CLAUDE_*`, `CODEX_*`, and `GEMINI_*` adapter aliases
-for the shared shell helpers. Adapter slots for Claude Code, Codex, and Gemini
-live in [`plugins/coordkit/adapters/`](plugins/coordkit/adapters/).
-The Claude slot is shipped; the Codex and Gemini slots are scaffolded and use
-the same core concepts and on-disk coordination state.
+Claude Code and Codex adapters are shipped. Claude's `CLAUDE_*` variables,
+`.claude-plugin/` packaging, and slash commands are adapter details. Codex has
+its own `.codex-plugin/plugin.json`, lifecycle hook schema, `apply_patch`
+translation, native subagent mapping, and `$coordkit` skill. Both use the same
+bus, ledger, guard, schema, transports, and `.coordkit-bus` state. The shared
+runtime accepts `COORDKIT_*`, `CLAUDE_*`, `CODEX_*`, and `GEMINI_*` aliases;
+Gemini remains scaffolded. Each heartbeat records `host`, so warnings identify
+the sibling as `claude-code`, `codex`, `gemini`, or `cli`.
+
+## Token-efficient context
+
+CoordKit keeps the complete coordination record on disk but sends only a
+bounded, relevant projection to the model. The default `[context]` profile in
+`plugins/coordkit/templates/coord.toml` is deliberately small:
+
+| Control | Default | Environment override |
+| --- | ---: | --- |
+| Context mode | `compact` | `COORDKIT_CONTEXT_MODE` |
+| Session-start budget | 160 estimated tokens | `COORDKIT_CONTEXT_SESSION_START_TOKENS` |
+| Prompt-delta budget | 96 estimated tokens | `COORDKIT_CONTEXT_PROMPT_TOKENS` |
+| Collision budget | 64 estimated tokens | `COORDKIT_CONTEXT_COLLISION_TOKENS` |
+| Token estimate | 4 bytes/token | `COORDKIT_CONTEXT_BYTES_PER_TOKEN` |
+| Tasks | 2 | `COORDKIT_CONTEXT_MAX_TASKS` |
+| Decisions | 1 | `COORDKIT_CONTEXT_MAX_DECISIONS` |
+| Questions | 1 | `COORDKIT_CONTEXT_MAX_QUESTIONS` |
+| Delta events | 3 | `COORDKIT_CONTEXT_MAX_EVENTS` |
+| Direct messages | 2 | `COORDKIT_CONTEXT_MAX_MESSAGES` |
+| Peers | 1 | `COORDKIT_CONTEXT_MAX_PEERS` |
+| Event body | 80 characters | `COORDKIT_CONTEXT_EVENT_BODY_CHARS` |
+| Repeat TTL | 3600 seconds | `COORDKIT_CONTEXT_REPEAT_TTL_SECONDS` |
+| Metrics file rotation | 262144 bytes | `COORDKIT_CONTEXT_METRICS_MAX_BYTES` |
+| Claude skill suggestions | top 1 | `COORDKIT_CONTEXT_SKILL_TOP_K` |
+
+All numeric controls must be positive integers. Invalid environment values
+fall back to `coord.toml`, then to the defaults above. Token counts are a cheap,
+deterministic byte estimate controlled by `bytes_per_token`, not a claim about
+any provider's exact tokenizer.
+
+The three modes trade automatic detail for prompt cost:
+
+- **`quiet`** — inject only critical collision/deny information and direct
+  inbox messages. Hard budgets still apply; collision/deny alerts are never
+  hidden by repeat suppression.
+- **`compact`** *(default)* — apply hard budgets, top-K category caps, and
+  hash-plus-TTL deduplication. Unchanged hook context is silent.
+- **`debug`** — keep the configured caps but disable repeat deduplication so
+  every selected payload can be inspected. Metrics remain local and are never injected.
+
+Nothing is deleted when an item is omitted from automatic context. Use
+`$coordkit` in Codex, `/ctx` in Claude Code, or `cobus digest` in a terminal to
+retrieve current detail on demand. Hook telemetry is written locally to
+`.coordkit-bus/metrics/context.ndjson` and rotates to `context.ndjson.1`; it
+records the event, host, bytes, estimated tokens, suppression count, and reason,
+without adding those measurements to the model prompt.
+
+The relay transports events and **does not consume model tokens** by itself;
+tokens are used only when a bounded projection of received events is later
+injected. To reduce host-level usage beyond CoordKit, start a fresh session at
+phase boundaries, keep `AGENTS.md` focused, disable unrelated plugins for the
+project, load skills only when the task needs them, store long logs/notes in
+files and reference them, and give subagents bounded context instead of full
+conversation history.
 
 ## Enforcement modes
 
@@ -168,12 +221,13 @@ own axis:
    configurable and the ledger accepts either version on read; this is the
    on-disk format axis, versioned independently of the tooling.
 3. **Transport** *(`plugins/coordkit/transports/`)* — how events move: `local`
-   (the per-repo `.coordkit-bus/` directory), and optional `git` / `relay`
-   backends behind a common `lib.sh`. This is the delivery axis.
+   (the per-repo `.coordkit-bus/` directory), optional asynchronous `git`, or
+   authenticated `relay` with durable local outbox and cursor replay. This is
+   the delivery axis.
 
 ## Install
 
-Add the marketplace, then install the plugin(s):
+Claude Code:
 
 ```bash
 # From a hosted git remote (GitHub/GitLab/git URL):
@@ -184,10 +238,22 @@ Add the marketplace, then install the plugin(s):
 /plugin install coordkit@coordkit
 ```
 
-**One plugin covers everything now.** Installing `coordkit` gives you the
-warn-only bus, ledger, and skill auto-activation immediately; running `/guard
-on` inside a repo adds the hard anti-clobber guard *there*. There is no second
-plugin to install for full functionality.
+Codex CLI, from a local clone:
+
+```bash
+codex plugin marketplace add /path/to/coordkit
+codex plugin add coordkit@coordkit
+```
+
+Start a new Codex session, open `/hooks`, and trust the CoordKit hook definition.
+Codex deliberately skips new or changed command hooks until their exact hash is
+reviewed. Use `$coordkit` for the bus, ledger, messaging, guard, fleet, and relay
+operations that Claude exposes as slash commands.
+
+**One plugin covers both hosts.** Installing `coordkit` gives you the warn-only
+bus and ledger. Claude also gets skill auto-activation; Codex gets the bundled
+`$coordkit` skill. `/guard on` in Claude, or `$coordkit` with guard `on` in
+Codex, adds hard anti-clobber enforcement for that repository.
 
 > **Distribution reality check.** As currently configured this repo's only
 > remote is **private** (`git@github.com:angantakpe/coordkit.git`),
@@ -252,7 +318,7 @@ Updates ship by bumping the plugin `version`; users pull them with
 
 ## What gets wired
 
-**coordkit** registers five lifecycle events across ten hook entries. Nine of
+The **Claude adapter** registers five lifecycle events across ten hook entries. Nine of
 them invoke the *same* dispatcher —
 `${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh` (via `${CLAUDE_PLUGIN_ROOT}` so the
 install location doesn't matter). `coord.sh` sources `bus.sh`, `ledger.sh`, and
@@ -274,6 +340,14 @@ costs one shell rather than one shell per subsystem. The tenth entry —
 | `PostToolUse`      | `Bash`                           | `posttool-bash`       | bus `record` → guard `absorb` (re-stamp self-inflicted changes)     |
 | `PostToolUse`      | `Task`                           | `posttool-task`       | bus `subagent-stop` (drop the running-subagent record)                   |
 | `SessionEnd`       | —                                 | `session-end`         | bus `stop` (also clears any still-running subagent records) → guard `cleanup` |
+
+The **Codex adapter** registers `SessionStart`, `UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`, and `SessionEnd`.
+Its thin adapter converts Codex `apply_patch` calls into one shared-core edit
+event per target path, observes explicit files in conservative read-only Bash
+commands for guard fingerprints, converts native subagent fields, and emits one
+Codex-valid context object even when the shared dispatcher produced several
+Claude-compatible NDJSON messages.
 
 `PostToolUse` is split by matcher rather than one combined
 `Write|Edit|NotebookEdit|Read|Bash|Task` entry, because each tool group needs a

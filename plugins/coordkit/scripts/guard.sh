@@ -104,7 +104,8 @@ _guard_tree_name() {
 _guard_base() {
   [ -n "$_GUARD_BASE" ] && { printf '%s' "$_GUARD_BASE"; return; }
   local cands=() cand
-  local tree="$(_guard_tree_name)"
+  local tree
+  tree="$(_guard_tree_name)"
   [ -n "${XDG_RUNTIME_DIR:-}" ] && cands+=("${XDG_RUNTIME_DIR}/${tree}")
   [ -n "${HOME:-}" ] && cands+=("${HOME}/.cache/${tree}")
   cands+=("${TMPDIR:-/tmp}/${tree}")
@@ -213,15 +214,15 @@ _GUARD_FS=$'\x1f'
 
 # First LIVE agent (excluding $3) whose heartbeat's `files` list contains $2
 # (a bus-root-relative path — bus.sh's `record` phase stores files that way,
-# via `rel="${file#$root/}"`). Prints "sid8<FS>branch<FS>task" on a hit.
+# via `rel="${file#$root/}"`). Prints "sid8<FS>host<FS>branch<FS>task".
 _guard_who_has_file() {  # <agents_dir> <relpath> <exclude_sid>
-  local agents="$1" relpath="$2" exclude="$3" f s last br task hit t
+  local agents="$1" relpath="$2" exclude="$3" f s host last br task hit t
   [ -d "$agents" ] || return 0
   t="$(date +%s)"
   for f in "$agents"/*.json; do
     [ -e "$f" ] || continue
-    IFS="$_GUARD_FS" read -r s last br task hit <<< "$(jq -r --arg p "$relpath" '
-        [ (.sid // ""), ((.last_seen // 0) | tostring), (.branch // "?"),
+    IFS="$_GUARD_FS" read -r s host last br task hit <<< "$(jq -r --arg p "$relpath" '
+        [ (.sid // ""), (.host // "unknown"), ((.last_seen // 0) | tostring), (.branch // "?"),
           (.task // ""), ((((.files // []) | index($p)) != null) | tostring) ]
         | join("")
       ' "$f" 2>/dev/null)"
@@ -229,7 +230,7 @@ _guard_who_has_file() {  # <agents_dir> <relpath> <exclude_sid>
     [ "$hit" = "true" ] || continue
     case "$last" in ''|*[!0-9]*) last=0 ;; esac
     [ $(( t - last )) -le "$_GUARD_LIVE_TTL" ] || continue
-    printf '%s\x1f%s\x1f%s\n' "${s:0:8}" "$br" "$task"
+    printf '%s\x1f%s\x1f%s\x1f%s\n' "${s:0:8}" "$host" "$br" "$task"
     return 0
   done
   return 0
@@ -243,18 +244,19 @@ _guard_who_has_file() {  # <agents_dir> <relpath> <exclude_sid>
 # hit (excluding $3), whether or not that session is still live — a claim is
 # a weaker, history-only signal (see docs/BUS.md §1), so this is deliberately
 # a lower-priority fallback behind _guard_who_has_file above, not another
-# liveness check.
+# liveness check. Prints "sid8<FS>host<FS>branch<FS>age_seconds".
 _guard_who_claimed() {  # <bus_dir> <key> <exclude_sid>
-  local bus="$1" key="$2" exclude="$3" cf s ts br t
+  local bus="$1" key="$2" exclude="$3" cf s ts host br t
   cf="${bus}/claims/${key}.json"
   [ -f "$cf" ] || return 0
   s="$(jq -r '.sid // empty' "$cf" 2>/dev/null)"
   { [ -z "$s" ] || [ "$s" = "$exclude" ]; } && return 0
   ts="$(jq -r '.ts // 0' "$cf" 2>/dev/null)"
   case "$ts" in ''|*[!0-9]*) ts=0 ;; esac
+  host="$(jq -r '.host // "unknown"' "${bus}/agents/${s}.json" 2>/dev/null)"
   br="$(jq -r '.branch // empty' "${bus}/agents/${s}.json" 2>/dev/null)"
   t="$(date +%s)"
-  printf '%s\x1f%s\x1f%s\n' "${s:0:8}" "$br" "$(( t - ts ))"
+  printf '%s\x1f%s\x1f%s\x1f%s\n' "${s:0:8}" "$host" "$br" "$(( t - ts ))"
   return 0
 }
 
@@ -264,26 +266,26 @@ _guard_who_claimed() {  # <bus_dir> <key> <exclude_sid>
 # it fresh.
 _guard_attribution() {  # <hook_json> <abs_file> [key]
   local input="$1" file="$2" key="${3:-}" root busdir relpath mysid
-  local sid8 br task age subj
+  local sid8 host br task age hint
   root="$(_guard_repo_root "$input")"
   busdir="${root}/.coordkit-bus"
   [ -d "$busdir" ] || return 0
   relpath="${file#"$root"/}"
   mysid="$(_guard_raw_sid "$input")"
-  subj="$(slug "$relpath")"
-
-  IFS="$_GUARD_FS" read -r sid8 br task <<< "$(_guard_who_has_file "${busdir}/agents" "$relpath" "$mysid")"
+  IFS="$_GUARD_FS" read -r sid8 host br task <<< "$(_guard_who_has_file "${busdir}/agents" "$relpath" "$mysid")"
   if [ -n "$sid8" ]; then
-    printf ' Session %s (branch: %s%s) is the likely source — try /msg %s "..." or /led ask %s "..." to coordinate.' \
-      "$sid8" "${br:-?}" "${task:+, working on: '${task}'}" "$sid8" "$subj"
+    hint="$(ck_coordination_hint "$sid8")"
+    printf ' Session %s (host: %s, branch: %s%s) is the likely source. %s' \
+      "$sid8" "${host:-unknown}" "${br:-?}" "${task:+, working on: '${task}'}" "$hint"
     return 0
   fi
 
   [ -n "$key" ] || key="$(_guard_hashkey "$file")"
-  IFS="$_GUARD_FS" read -r sid8 br age <<< "$(_guard_who_claimed "$busdir" "$key" "$mysid")"
+  IFS="$_GUARD_FS" read -r sid8 host br age <<< "$(_guard_who_claimed "$busdir" "$key" "$mysid")"
   if [ -n "$sid8" ]; then
-    printf ' Session %s'"'"'s file-lock claim on this file is the most recent%s, ~%ss ago — try /msg %s "..." or /led ask %s "..." to coordinate.' \
-      "$sid8" "${br:+ (branch: $br)}" "${age:-?}" "$sid8" "$subj"
+    hint="$(ck_coordination_hint "$sid8")"
+    printf ' Session %s'"'"'s file-lock claim on this file is the most recent (host: %s%s), ~%ss ago. %s' \
+      "$sid8" "${host:-unknown}" "${br:+, branch: $br}" "${age:-?}" "$hint"
     return 0
   fi
   return 0

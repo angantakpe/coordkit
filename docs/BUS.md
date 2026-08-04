@@ -16,12 +16,14 @@ bus's phases; see [§8](#8-the-bus-and-guard-mode) for where guard fits.
 Everything lives under `<repo>/.coordkit-bus/`:
 
 ```
-agents/<sid>.json           heartbeat: {sid, branch, cwd, task, files, last_seen}
+agents/<sid>.json           heartbeat: {sid, host, branch, cwd, task, files, last_seen}
 claims/<sha>.json           soft FILE lock: {path, sid, ts} — one per touched file
 subagents/<sid>/<tid>.json  a subagent this session currently has running:
                             {sid, tool_use_id, subagent_type, description, started_at}
 inbox/<sid>/*.msg    messages waiting for that instance
 activity.log         feed: "<iso>\t<sid8>\t<verb>\t<detail>"
+metrics/context.ndjson
+                     local hook-cost telemetry (rotates to context.ndjson.1)
 ```
 
 **`claims/` here means file claims, not task claims** — a per-file soft lock
@@ -37,6 +39,38 @@ session's own `subagents/<sid>/` directory is also wiped on `SessionEnd` and
 by `prune_dead()` if the owning heartbeat goes hard-stale, so a crashed
 session can't leave a phantom "still running" record behind. It's what powers
 the SUBAGENTS lines in `/bus` (§7) and the same-type heads-up described there.
+
+`host` is adapter identity (`claude-code`, `codex`, `gemini`, or `cli`). It is
+included in session, collision, guard-attribution, and subagent messages so an
+operator can tell which runtime owns a claim. Pre-5.0 heartbeat files without
+the field render as `unknown`.
+
+### Automatic context is a projection, not the dashboard
+
+The hook path is intentionally smaller than `/bus`/`cobus dashboard`. At
+`SessionStart`, automatic context is silence-by-default: only direct inbox
+messages and actual file-overlap collisions are injected, with message bodies
+capped at 80 characters and collision detail capped to a single peer/file line
+by default. Counts and omission hints preserve awareness when more exist. Inbox
+overflow is not discarded: undelivered files remain queued for a later prompt.
+`UserPromptSubmit` is otherwise silent unless a direct message or another
+change-driven subsystem has something new.
+
+`compact` mode applies the caps plus hash/TTL repeat suppression; `quiet`
+limits automatic context to critical collisions, guard denials, and direct inbox
+messages; `debug` keeps configured caps and disables deduplication. The
+dispatcher hard-caps the combined hook payload at 160 estimated tokens on
+session start, 96 on prompt submit, and 64 for collision warnings. Use
+`$coordkit`, `/bus`, or `cobus dashboard` for the current on-demand view
+instead of enlarging every prompt.
+
+The relevant controls are `[context].max_peers`, `max_messages`,
+`event_body_chars`, and `repeat_ttl_seconds`, overridden by
+`COORDKIT_CONTEXT_MAX_PEERS`, `COORDKIT_CONTEXT_MAX_MESSAGES`,
+`COORDKIT_CONTEXT_EVENT_BODY_CHARS`, and
+`COORDKIT_CONTEXT_REPEAT_TTL_SECONDS`. Local measurements go to
+`.coordkit-bus/metrics/context.ndjson`; metrics are never injected into model
+context.
 
 ## 2. Heartbeats and liveness
 
@@ -67,12 +101,19 @@ start of a long session shouldn't keep warning every sibling for hours. The
 claim itself isn't deleted by this, though; `/bus`'s COLLISIONS section still
 shows it as historical context.
 
+The model-facing warning is separately capped at 64 estimated tokens by
+`[context].collision_tokens` or `COORDKIT_CONTEXT_COLLISION_TOKENS`. It is
+critical context: `quiet` mode retains it, and repeat suppression does not hide
+the warning when a colliding edit is attempted again.
+
 ## 4. Messaging
 
 `msg <all|sid8|branch:name> "<text>"` drops a timestamped line into the
 target session(s)' `inbox/<sid>/*.msg`, delivered as injected context at their
-next `SessionStart` or `UserPromptSubmit`, then deleted. Messages sent from a
-plain shell (not from inside a live session) run under a constant `sid=cli`
+next `SessionStart` or `UserPromptSubmit`, then deleted. Delivery is capped per
+hook (`max_messages = 2` by default); excess message files stay queued rather
+than being silently consumed. Messages sent from a plain shell (not from inside
+a live session) run under a constant `sid=cli`
 identity — deliberately, this one case is *not* resolved to the real
 session id the way `claim`/`done`/`tasks` are (see §5), because there's no
 "who is this instance" question to answer for a broadcast; `all` targets
