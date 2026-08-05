@@ -29,7 +29,7 @@
     "session_schema": "packages/protocol/session.schema.json",
     "task_schema": "packages/protocol/task.schema.json",
     "transport_schema": "packages/protocol/transport.schema.json",
-    "runtime": "packages/coordkit-core/scripts",
+    "runtime": "packages/core/scripts",
     "transports": "plugins/coordkit/transports",
     "plugin_wrappers": "plugins/coordkit/scripts"
   },

@@ -16,7 +16,7 @@
 # mkdir, no config reads. Everything is deferred to call time.
 #
 # Sourced as:
-#   packages/coordkit-core/scripts/*    . "${COORDKIT_CORE_ROOT:-${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}}}/scripts/common.sh"
+#   packages/core/scripts/*             . "${COORDKIT_CORE_ROOT:-${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}}}/scripts/common.sh"
 #   plugin wrappers                     re-source this file after setting COORDKIT_CORE_ROOT
 #   transports/                          via __logstore_common (COORDKIT_PLUGIN_ROOT, else legacy fallback)
 #   bin/*                                relative to the readlink-resolved ROOT

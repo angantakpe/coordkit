@@ -25,7 +25,7 @@ helps them answer:
 
 The shared coordination runtime is surfaced through the `packages/` layer, and
 `plugins/coordkit/` stays focused on host packaging and wrappers.
-The actual runtime scripts live in `packages/coordkit-core/scripts`; the
+The actual runtime scripts live in `packages/core/scripts`; the
 plugin-side files are thin wrappers around that package.
 
 ## The architecture

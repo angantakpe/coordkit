@@ -1,13 +1,13 @@
 # How the bus works
 
-`packages/coordkit-core/scripts/bus.sh` is coordkit's awareness layer — the
+`packages/core/scripts/bus.sh` is coordkit's awareness layer — the
 "who else is here, what are they touching" half of the system. It's simpler
 than the ledger (`docs/LEDGER.md`): no event sourcing, just per-session
 heartbeat files and a soft-lock convention, refreshed on every hook.
 
 The bus is not invoked directly by hooks. Every lifecycle event goes to the
 single dispatcher `plugins/coordkit/scripts/swarm.sh`, which is now a thin
-wrapper over the runtime in `packages/coordkit-core/scripts/swarm.sh`. That
+wrapper over the runtime in `packages/core/scripts/swarm.sh`. That
 runtime sources `bus.sh`, `ledger.sh`, and `guard.sh` as libraries and runs
 their phases in-process — so one hook event costs one shell, not one per
 subsystem. This doc covers only the bus's phases; see [§8](#8-the-bus-and-guard-mode)
@@ -168,7 +168,7 @@ default, see its own `--help`), and `cobus fleet` (same as `/fleet`).
 
 Through coordkit 2.x, the hard anti-clobber blocker was a **separate plugin**
 (`coordguard`) that you installed alongside coordkit. As of **3.0.0** the
-implementation lives in `packages/coordkit-core/scripts/guard.sh`, with
+implementation lives in `packages/core/scripts/guard.sh`, with
 `plugins/coordkit/scripts/guard.sh` kept as a wrapper for compatibility. The
 same runtime is reached by the shared `swarm.sh` dispatcher. Full details —
 the `warn` vs `guard` modes, how the mode is resolved from env / `coord.toml`

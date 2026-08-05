@@ -8,7 +8,7 @@ coordkit now ships to mitigate it, and what stays manual permanently.
 
 ## 1. What the badge prints
 
-`bus.sh badge` (see `packages/coordkit-core/scripts/bus.sh`, with
+`bus.sh badge` (see `packages/core/scripts/bus.sh`, with
 `plugins/coordkit/scripts/bus.sh` as the compatibility wrapper, the `badge`
 phase) does
 two things per statusline refresh:
@@ -98,7 +98,7 @@ they're what make the §3 incident non-repeatable:
 **The wrapper glob-discovers `bus.sh` at run time** rather than baking in a
 path — it resolves
 `~/.claude/plugins/marketplaces/*/plugins/coordkit/scripts/bus.sh` on every
-invocation, and the plugin wrapper forwards into `packages/coordkit-core/scripts`
+invocation, and the plugin wrapper forwards into `packages/core/scripts`
 at runtime. A future rename of the marketplace directory, or of coordkit's own
 layout above `scripts/`, therefore self-heals: the next statusline refresh
 picks up the new location with no reinstall. And if the glob genuinely matches

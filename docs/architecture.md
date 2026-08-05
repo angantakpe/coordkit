@@ -13,7 +13,7 @@ coordkit/
 │   └── cli/
 │
 ├── packages/
-│   ├── coordkit-core/
+│   ├── core/
 │   │   ├── scripts/
 │   │   ├── commands/
 │   │   ├── schemas/
@@ -66,7 +66,7 @@ coordkit/
 - `apps/` holds runnable entrypoints.
 - `apps/relay/` is the network service for cross-machine event sharing.
 - `apps/cli/` is the command-line entrypoint surface.
-- `packages/coordkit-core/` is the current home for the shared runtime scripts
+- `packages/core/` is the current home for the shared runtime scripts
   and shared package metadata.
 - `packages/protocol/` defines events, commands, and schemas.
 - `packages/core/` holds the shared coordination domain: sessions, peers,
@@ -89,7 +89,7 @@ coordkit/
 ## Current shape
 
 The current repository now places the relay service under `apps/relay/` and the
-shared runtime scripts under `packages/coordkit-core/scripts/`, with
+shared runtime scripts under `packages/core/scripts/`, with
 `plugins/coordkit/scripts/` kept as wrappers. That is a meaningful step toward
 the target boundary, but it is still not the full package split described
 above.

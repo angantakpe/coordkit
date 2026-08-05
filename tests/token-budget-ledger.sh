@@ -14,7 +14,7 @@ jq -e '
   and (.entities | index("message"))
   and (.invariants | index("history is append-only"))
 ' "$ROOT/packages/protocol/protocol.json" >/dev/null
-COORDKIT_CORE_ROOT="$ROOT/packages/coordkit-core" bash -c '
+COORDKIT_CORE_ROOT="$ROOT/packages/core" bash -c '
   set -euo pipefail
   . "$COORDKIT_CORE_ROOT/scripts/common.sh"
   test "$(ck_protocol_root)" = "'"$ROOT/packages/protocol"'"

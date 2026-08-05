@@ -1,6 +1,6 @@
-# coordkit-core
+# core
 
-`coordkit-core` is the explicit coordination engine package behind the plugin
+`core` is the explicit coordination engine package behind the plugin
 surface. It is the place to look for the domain model and shared command
 catalog, independent of any host adapter.
 

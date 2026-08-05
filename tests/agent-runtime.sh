@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN="${ROOT}/plugins/coordkit"
-PACKAGE_RUNTIME="${ROOT}/packages/coordkit-core/scripts/agent-runtime.py"
+PACKAGE_RUNTIME="${ROOT}/packages/core/scripts/agent-runtime.py"
 PLUGIN_RUNTIME="${PLUGIN}/scripts/agent-runtime.py"
 tmp="$(mktemp -d /tmp/coordkit-agent-runtime.XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT
