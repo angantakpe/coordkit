@@ -16,7 +16,7 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
-## Unreleased
+## 5.2.1
 
 ### Changed
 - Promoted the coordination engine into an explicit `packages/coordkit-core`
