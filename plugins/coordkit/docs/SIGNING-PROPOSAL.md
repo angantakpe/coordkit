@@ -4,7 +4,8 @@ This is a proposal, not a plan of record. `plugins/coordkit/scripts/signing.sh`
 ships a working, tested ed25519 sign/verify library (`bash signing.sh
 selftest` proves it end to end), but it is **not called from anywhere in the
 live hook path**. `append_event`/`_ck_emit_v2` in `ledger.sh` still write
-`sig: null` on every event, exactly as `schema/event.schema.json` documents.
+`sig: null` on every event, exactly as `packages/protocol/event.schema.json`
+documents.
 Wiring this in for real is a security-sensitive, cross-cutting change and
 deserves the repo owner's explicit sign-off on the trust/key-distribution
 model below before it touches `ledger.sh`'s write or read paths.
@@ -100,7 +101,8 @@ signature only X's private key could have produced.
 - **Replay / reordering** — a signature over `canonicalize(event minus
   eid,sig)` says nothing about WHEN or in what order an event was
   (re-)injected; that's `clock`/`seq`'s job, not `sig`'s, and neither is
-  cross-replica-authoritative today either (see `event.schema.json`'s notes
+  cross-replica-authoritative today either (see
+  `packages/protocol/event.schema.json`'s notes
   on both fields).
 - **Prompt injection via event body content.** A validly-signed event can
   still carry an adversarial `body` — signing proves who wrote it, not that

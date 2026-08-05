@@ -10,7 +10,7 @@ Run one process per data directory behind an HTTPS reverse proxy:
 ```bash
 COORDKIT_RELAY_TOKEN='replace-me' \
 COORDKIT_RELAY_DATA=/var/lib/coordkit-relay \
-node relay/server.mjs
+node server.mjs
 ```
 
 For room-specific authorization, set `COORDKIT_RELAY_TOKENS` to a JSON map:

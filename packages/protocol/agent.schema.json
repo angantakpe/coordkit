@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coordkit/schema/agent/1.0",
+  "title": "coordkit agent definition",
+  "description": "Logical definition of one coordinated agent role. The runtime currently loads these from Markdown frontmatter, but the schema names the contract so agent discovery is not only an implementation detail.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["name", "description", "role_type", "lifecycle_stage", "routing_keywords"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Stable agent name used for routing and display."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short human-readable summary of the agent's purpose."
+    },
+    "role_type": {
+      "type": "string",
+      "enum": ["orchestration", "system"],
+      "description": "Whether the agent participates in workflow orchestration or system diagnosis."
+    },
+    "lifecycle_stage": {
+      "type": "string",
+      "enum": ["planning", "dispatch", "execution", "integration", "verification", "diagnostics"],
+      "description": "Workflow stage where the agent is relevant."
+    },
+    "routing_keywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Terms used to match a task to the agent."
+    },
+    "tools": {
+      "type": ["string", "array"],
+      "description": "Optional tool access declaration for the host runtime."
+    },
+    "color": {
+      "type": "string",
+      "description": "Optional UI color hint for the agent."
+    }
+  }
+}

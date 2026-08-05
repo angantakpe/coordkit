@@ -250,7 +250,7 @@ entries are no longer on disk but remain in git history
     wired, whether it resolves to the coordkit wrapper, whether the wrapper's
     glob still finds `bus.sh`, and prints a badge preview. Exits non-zero on a
     genuine problem so it can gate a script, but never crashes.
-- **Passive statusline drift check on `SessionStart`.** `coord.sh`'s
+- **Passive statusline drift check on `SessionStart`.** `swarm.sh`'s
   `session-start` now also runs `statusline_drift_note` — two stats and a glob,
   read-only, no writes. Silent unless the wrapper is installed *and* its glob no
   longer resolves, in which case it adds one line to the session's
@@ -336,7 +336,7 @@ behaves exactly like 2.3.0 — warn-only, never denies a tool call.
     the pre-existing `COORDKIT_MODE`, which selects transport, not enforcement).
 
 ### Changed
-- **One dispatcher.** The hooks now call a single `scripts/coord.sh`, which
+- **One dispatcher.** The hooks now call a single `scripts/swarm.sh`, which
   fans out to the bus, the ledger, and (in guard mode) the guard. `hooks.json`
   fires on the union of both plugins' events; the guard phases are gated behind
   the mode check, so in the default warn-only mode they are no-ops.

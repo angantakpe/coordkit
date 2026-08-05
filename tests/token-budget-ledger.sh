@@ -6,6 +6,52 @@ PLUGIN="${ROOT}/plugins/coordkit"
 tmp="$(mktemp -d /tmp/coordkit-ledger-budget.XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT
 
+jq -e '
+  .name == "coordkit-protocol"
+  and (.entities | index("agent"))
+  and (.entities | index("session"))
+  and (.entities | index("event"))
+  and (.entities | index("message"))
+  and (.invariants | index("history is append-only"))
+' "$ROOT/packages/protocol/protocol.json" >/dev/null
+COORDKIT_CORE_ROOT="$ROOT/packages/coordkit-core" bash -c '
+  set -euo pipefail
+  . "$COORDKIT_CORE_ROOT/scripts/common.sh"
+  test "$(ck_protocol_root)" = "'"$ROOT/packages/protocol"'"
+  test "$(ck_protocol_schema_path agent)" = "'"$ROOT/packages/protocol/agent.schema.json"'"
+  test "$(ck_protocol_schema_path event)" = "'"$ROOT/packages/protocol/event.schema.json"'"
+  test "$(ck_protocol_schema_path message)" = "'"$ROOT/packages/protocol/message.schema.json"'"
+'
+test "$(jq -r '."$id"' "$ROOT/packages/protocol/agent.schema.json")" = 'https://coordkit/schema/agent/1.0'
+jq -e '.title == "coordkit agent definition" and (.required | index("name")) and (.required | index("role_type"))' \
+  "$ROOT/packages/protocol/agent.schema.json" >/dev/null
+test "$(jq -r '."$id"' "$ROOT/packages/protocol/event.schema.json")" = 'https://coordkit/schema/event/2.0'
+jq -e '.title == "coordkit session state" and (.required | index("sid")) and (.required | index("last_seen"))' \
+  "$ROOT/packages/protocol/session.schema.json" >/dev/null
+jq -e '.title == "coordkit claim envelope" and (.required | index("kind")) and (.required | index("owner"))' \
+  "$ROOT/packages/protocol/claim.schema.json" >/dev/null
+jq -e '.title == "coordkit task projection" and (.required | index("subject")) and (.required | index("status"))' \
+  "$ROOT/packages/protocol/task.schema.json" >/dev/null
+jq -e '
+  .["$id"] == "https://coordkit/schema/message/1.0"
+  and .title == "coordkit message envelope"
+  and (.required | index("sender"))
+  and (.required | index("target"))
+' "$ROOT/packages/protocol/message.schema.json" >/dev/null
+jq -e '.title == "coordkit transport family" and (.required | index("mode")) and (.required | index("storage"))' \
+  "$ROOT/packages/protocol/transport.schema.json" >/dev/null
+grep -Fq '`agent` is now first-class in `packages/protocol/`' "$ROOT/packages/protocol/README.md"
+grep -Fq '`message` is now a first-class protocol object' "$ROOT/packages/protocol/README.md"
+grep -Fq 'packages/protocol/message.schema.json' "$ROOT/packages/protocol/README.md"
+jq -e '
+  .current_implementation.agent_schema == "packages/protocol/agent.schema.json"
+  and .current_implementation.message_schema == "packages/protocol/message.schema.json"
+  and .current_implementation.session_schema == "packages/protocol/session.schema.json"
+  and .current_implementation.claim_schema == "packages/protocol/claim.schema.json"
+  and .current_implementation.task_schema == "packages/protocol/task.schema.json"
+  and .current_implementation.transport_schema == "packages/protocol/transport.schema.json"
+' "$ROOT/packages/protocol/protocol.json" >/dev/null
+
 git -C "$tmp" init -q
 mkdir -p "$tmp/.coordkit-bus" "$tmp/.claude/coord"
 printf '*\n' > "$tmp/.coordkit-bus/.gitignore"
@@ -178,5 +224,68 @@ wm_fresh="$(shared_ledger start wm-fresh SessionStart)"
 wm_fresh_ctx="$(printf '%s' "$wm_fresh" | jq -r '.hookSpecificOutput.additionalContext')"
 printf '%s' "$wm_fresh_ctx" | grep -q 'remote-low-seq-wins'
 ! printf '%s' "$wm_fresh_ctx" | grep -q 'initial-value'
+
+# Append-only read paths must survive a mix of duplicated events, raw garbage,
+# and a partially written tail line without losing the valid lines around them.
+mkdir -p "$shared/.coordkit-bus/log/actor-d" "$shared/.coordkit-bus/log/actor-e"
+jq -nc '
+  {schema_version:"2.0",eid:"sha256:append-dup",actor:"actor-d",clock:{p:300,c:1},seq:1,ts:4,
+   sid:"peer-d",sid8:"peer-d",host:"codex",branch:"main",type:"note",subject:"dup-subject",
+   body:"dedup-me",refs:[],tags:[],lease:null},
+  {schema_version:"2.0",eid:"sha256:append-dup",actor:"actor-e",clock:{p:301,c:1},seq:2,ts:4,
+   sid:"peer-e",sid8:"peer-e",host:"codex",branch:"main",type:"note",subject:"dup-subject",
+   body:"dedup-me-too",refs:[],tags:[],lease:null},
+  {schema_version:"2.0",eid:"sha256:append-good",actor:"actor-d",clock:{p:302,c:2},seq:3,ts:4,
+   sid:"peer-d",sid8:"peer-d",host:"codex",branch:"main",type:"decision",subject:"good-subject",
+   body:"still-visible",refs:[],tags:[],lease:null}
+' > "$shared/.coordkit-bus/log/actor-d/seg.ndjson"
+printf '%s\n' '{"schema_version":"2.0","eid":"sha256:append-garbage","id":"broken"' \
+  > "$shared/.coordkit-bus/log/actor-e/seg.ndjson"
+printf '%s\n' '{"schema_version":"2.0","eid":"sha256:append-garbage","id":"broken"' \
+  >> "$shared/.coordkit-bus/log/actor-e/seg.ndjson"
+printf '%s\n' '{"schema_version":"2.0","eid":"sha256:append-good-2","id":"ok","actor":"actor-e","clock":{"p":303,"c":1},"seq":4,"ts":4,"sid":"peer-e","sid8":"peer-e","host":"codex","branch":"main","type":"note","subject":"good-subject-2","body":"tail survives","refs":[],"tags":[],"lease":null}' \
+  >> "$shared/.coordkit-bus/log/actor-e/seg.ndjson"
+append_readall="$(
+  COORDKIT_PLUGIN_ROOT="$PLUGIN" COORDKIT_BUS_ROOT="$shared" COORDKIT_USE_LOGSTORE=1 \
+    COORDKIT_MODE=local COORDKIT_HOST=codex bash -c '
+      . "$COORDKIT_PLUGIN_ROOT/transports/lib.sh"
+      logstore_readall
+    '
+)"
+printf '%s' "$append_readall" | grep -q 'still-visible'
+printf '%s' "$append_readall" | grep -q 'tail survives'
+test "$(printf '%s\n' "$append_readall" | grep -c 'sha256:append-dup' || true)" -eq 1
+printf '%s' "$append_readall" | grep -q '{"schema_version":"2.0","eid":"sha256:append-garbage","id":"broken"'
+
+# Concurrent writers must serialize cleanly. Exercise the live append path with
+# many background processes targeting the same actor partition, then prove the
+# resulting file still parses as JSON line-by-line and every event survives.
+concurrent="$tmp/concurrent"
+mkdir -p "$concurrent"
+for i in $(seq 1 24); do
+  COORDKIT_PLUGIN_ROOT="$PLUGIN" COORDKIT_BUS_ROOT="$concurrent" \
+    COORDKIT_USE_LOGSTORE=1 COORDKIT_MODE=local COORDKIT_HOST=codex \
+    bash -c '
+      set -euo pipefail
+      . "$COORDKIT_PLUGIN_ROOT/transports/lib.sh"
+      n="$1"
+      line="$(jq -nc --arg eid "sha256:race-$n" --argjson n "$n" \
+        "{schema_version:\"2.0\",eid:\$eid,id:\$eid,actor:\"race-actor\",clock:{p:\$n,c:1},seq:\$n,ts:4,sid:\"race\",sid8:\"race\",host:\"codex\",branch:\"main\",type:\"note\",subject:(\"race-\" + (\$n|tostring)),body:(\"body \" + (\$n|tostring)),refs:[],tags:[],lease:null}")"
+      logstore_append "$line"
+    ' _ "$i" &
+done
+wait
+race_file="$concurrent/.coordkit-bus/log/race-actor/seg.ndjson"
+test "$(wc -l < "$race_file" | tr -d ' ')" -eq 24
+test "$(jq -Rr 'fromjson | select(type=="object") | .eid' "$race_file" | sort -u | wc -l | tr -d ' ')" -eq 24
+race_readall="$(
+  COORDKIT_PLUGIN_ROOT="$PLUGIN" COORDKIT_BUS_ROOT="$concurrent" \
+    COORDKIT_USE_LOGSTORE=1 COORDKIT_MODE=local COORDKIT_HOST=codex \
+    bash -c '
+      . "$COORDKIT_PLUGIN_ROOT/transports/lib.sh"
+      logstore_readall
+    '
+)"
+test "$(printf '%s\n' "$race_readall" | grep -c 'sha256:race-' || true)" -eq 24
 
 echo "ledger token governor: ok"

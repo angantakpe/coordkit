@@ -42,7 +42,7 @@ ledger scripts ─► logstore_append / logstore_readall / logstore_tail / logst
 - **relay**: an authenticated delivery accelerator on top of a durable local or
   git backing. Appends are staged in an on-disk outbox, POSTed with acknowledgement,
   and replayed from a server cursor before reads. A dependency-free reference
-  server is bundled under `relay/` at the repository root.
+  server is bundled under `apps/relay/`.
 
 ## Graceful degradation: relay → git → local (each a no-op cutover)
 
@@ -113,7 +113,7 @@ Going multi-machine relaxes guarantees that hold trivially on one box. Be explic
 
 ## Relay deployment and authentication
 
-Run `relay/server.mjs` with Node 20+ or build `relay/Dockerfile`. Require either
+Run `apps/relay/server.mjs` with Node 20+ or build `apps/relay/Dockerfile`. Require either
 `COORDKIT_RELAY_TOKEN` or a `COORDKIT_RELAY_TOKENS` JSON map of token to allowed
 rooms. The server binds to loopback by default and should sit behind an HTTPS
 reverse proxy for cross-machine use. Clients keep tokens in the environment,
@@ -129,7 +129,7 @@ The server provides durable fsynced append, per-room bearer authorization,
 `eid` deduplication with conflicting-content rejection, cursor pagination,
 validated acknowledgement, and optional long polling. It enforces a single
 process per data directory. See
-`relay/README.md` for deployment settings.
+`apps/relay/README.md` for deployment settings.
 
 ## Incremental reads: use per-actor cursors
 

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # Codex hook adapter. It translates Codex-native hook payloads into the compact
-# Claude-compatible event contract consumed by the shared coord.sh runtime.
+# Claude-compatible event contract consumed by the shared swarm.sh runtime.
 set -uo pipefail
 
 phase="${1:-}"
 input="$(cat)"
 
 ROOT="${PLUGIN_ROOT:-${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2>/dev/null && pwd)}}}"
-[ -f "${ROOT}/scripts/coord.sh" ] || exit 0
+[ -f "${ROOT}/scripts/swarm.sh" ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
 cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)"
@@ -29,7 +29,7 @@ if [ -n "${PLUGIN_DATA:-}" ]; then
 fi
 
 run_coord() { # <phase> <json>
-  printf '%s' "$2" | bash "${ROOT}/scripts/coord.sh" "$1"
+  printf '%s' "$2" | bash "${ROOT}/scripts/swarm.sh" "$1"
 }
 
 emit_context() { # <Codex event> <zero or more NDJSON blobs on stdin>

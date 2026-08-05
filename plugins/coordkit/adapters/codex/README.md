@@ -8,7 +8,7 @@ Packaging and runtime entrypoints:
 - `adapter.json` — machine-readable adapter pointer.
 - `../../hooks/hooks.json` — default cross-host lifecycle configuration.
 - `../hook.sh` — cross-host dispatcher.
-- `hook.sh` — Codex payload translation into `scripts/coord.sh`.
+- `hook.sh` — Codex payload translation into `scripts/swarm.sh`.
 - `../../skills/coordkit/` — the Codex command/workflow surface, which wraps
   the shared command specs in `../../commands/README.md`.
 

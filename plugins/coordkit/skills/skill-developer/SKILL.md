@@ -54,7 +54,7 @@ PreToolUse blocking of edits on behalf of a skill.
 
 Note that coordkit registers *other* hooks in the same `hooks.json`
 (`SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd`) — those belong to the
-coordination bus and anti-clobber guard (`coord.sh`), not to skill activation.
+coordination bus and anti-clobber guard (`swarm.sh`), not to skill activation.
 `skill-activation.sh` is stateless and independent of them.
 
 ### Configuration File

@@ -7,7 +7,7 @@ future runtime.
 
 An adapter is the host-specific packaging layer that:
 
-- Maps the host's lifecycle events onto the shared `coord.sh` phases.
+- Maps the host's lifecycle events onto the shared `swarm.sh` phases.
 - Supplies the host-specific environment variables and plugin paths.
 - Exposes any command or UI surface the host supports by wrapping the shared
   command specs.

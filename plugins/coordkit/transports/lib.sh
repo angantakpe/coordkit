@@ -180,7 +180,7 @@ __logstore_actor_of() {
 # WHAT THIS ORDER ACTUALLY IS (and its known limitation). `clock.p` is wall-clock
 # MILLISECONDS, stamped locally by whichever machine emitted the event; `clock.c` is
 # a plain per-actor monotonic counter that is never reconciled against peers (see
-# schema/event.schema.json — Lamport-style cross-replica advancement is not
+# packages/protocol/event.schema.json — Lamport-style cross-replica advancement is not
 # implemented). Sorting primarily by `clock.p` therefore IS, across different actors,
 # wall-clock last-writer-wins: two contributors whose machine clocks disagree will see
 # their events interleaved by that skew, and `clock.c`/`actor` only break EXACT-

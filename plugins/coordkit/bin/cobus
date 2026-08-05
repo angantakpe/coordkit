@@ -87,7 +87,7 @@ case "${1:-}" in
   migrate)  shift; exec bash "${ROOT}/scripts/migrate.sh" "$@" ;;
   gc)       shift; exec bash "${ROOT}/scripts/gc.sh" "$@" ;;
   fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;
-  swarm)    shift; exec bash "${ROOT}/scripts/swarm.sh" "$@" ;;
+  swarm)    shift; exec bash "${ROOT}/scripts/worker-runtime.sh" "$@" ;;
   agents)   shift; exec python3 "${ROOT}/scripts/agent-runtime.py" "$@" ;;
 esac
 

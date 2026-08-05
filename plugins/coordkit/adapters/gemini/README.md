@@ -9,7 +9,7 @@ and event wiring that maps its lifecycle to the shared coord phases.
 Expected responsibilities:
 
 - Provide a Gemini-native manifest or extension entrypoint.
-- Map Gemini lifecycle events to `scripts/coord.sh` phases.
+- Map Gemini lifecycle events to `scripts/swarm.sh` phases.
 - Pass through session, workspace, and tool metadata in the shared contract.
 - Bind any command or UI surface Gemini exposes to the shared CLI helpers.
 

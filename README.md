@@ -2,8 +2,8 @@
 
 CoordKit is infrastructure for coordinating multiple coding agents working on
 the same repository, not an autonomous software-delivery system by itself. It
-packages a working coordination core so it becomes installable, shareable, and
-semver-versioned instead of a hand-wired set of host-specific hook scripts.
+packages a shared coordination runtime so it becomes installable, shareable,
+and semver-versioned instead of a hand-wired set of host-specific hook scripts.
 This repository ships Claude Code and Codex adapters as one plugin named
 `coordkit`, plus an optional authenticated relay server for cross-machine use.
 
@@ -23,9 +23,10 @@ helps them answer:
 - How can agents coordinate across different computers?
 - What context should be injected into a new agent session?
 
-The shared coordination engine is surfaced as
-[`packages/coordkit-core`](/home/anga/workspace/projects/agents/coordkit/packages/coordkit-core),
-while `plugins/coordkit/` stays focused on host packaging and wrappers.
+The shared coordination runtime is surfaced through the `packages/` layer, and
+`plugins/coordkit/` stays focused on host packaging and wrappers.
+The actual runtime scripts live in `packages/coordkit-core/scripts`; the
+plugin-side files are thin wrappers around that package.
 
 ## The architecture
 
@@ -117,7 +118,7 @@ It ships **one plugin**:
 
 | Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **coordkit** | 5.2.0   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. The command surface is defined once as shared specs, then exposed through Claude Code slash-command wrappers, Codex skill surfaces, and native agents. |
+| **coordkit** | 5.2.1   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. The command surface is defined once as shared specs, then exposed through Claude Code slash-command wrappers, Codex skill surfaces, and native agents. |
 
 > **`coordguard` and `skillkit` have both been merged in.** Through 2.x, the
 > hard anti-clobber blocker shipped as a separate `coordguard` package. As of
@@ -140,6 +141,9 @@ under the hood:
 - **[docs/LEDGER.md](docs/LEDGER.md)** — the shared-context layer: the
   event-sourcing model, the task queue (leases, auto-claim, work-stealing),
   pagination/digests, and the non-local transport trust gate.
+- **[docs/architecture.md](docs/architecture.md)** — the high-level repo map:
+  the recommended target layout, the current layering, and the migration
+  direction.
 - **[docs/STATUSLINE.md](docs/STATUSLINE.md)** — the Claude statusline badge:
   what it shows, why a manifest cannot wire it, and how to keep it wired.
 - **[docs/HOSTS.md](docs/HOSTS.md)** — the host/adapter split: what belongs to
@@ -353,28 +357,13 @@ routinely edited by several agents at once and wants a hard guard" travels with
 the repository instead of depending on each teammate having independently
 installed the right thing.
 
+See [docs/architecture.md](docs/architecture.md) for the target layout, the
+dependency direction, and the plain-English explanation of each top-level area.
+
 ## The three layers
 
-This package is organized as three independent layers so each can evolve on its
-own axis:
-
-1. **Distribution / packaging** *(this README, the marketplace, plugin manifests,
-   hook wiring)* — how the system is installed, versioned, and updated. The
-   coordkit `version` (see `plugins/coordkit/.claude-plugin/plugin.json`) is the
-   tooling-version axis. The 2.3.0 → 3.0.0 major bump was a change on *this axis
-   only* — folding coordguard
-   in changed the hook surface and the safety contract, and deliberately did not
-   touch layers 2 and 3. Guard mode keeps its own state and emits no events, so
-   the on-disk event format and the delivery mechanism are byte-identical to
-   2.3.0.
-2. **Schema** *(`plugins/coordkit/schema/`)* — the versioned event envelope
-   plus its JSON Schema, manifest, and migrations. The envelope version is
-   configurable and the ledger accepts either version on read; this is the
-   on-disk format axis, versioned independently of the tooling.
-3. **Transport** *(`plugins/coordkit/transports/`)* — how events move: `local`
-   (the per-repo `.coordkit-bus/` directory), optional asynchronous `git`, or
-   authenticated `relay` with durable local outbox and cursor replay. This is
-   the delivery axis.
+This package still has three separate concerns: distribution/packaging, schema,
+and transport. The details live in the linked docs and the code itself.
 
 ## Install
 
@@ -471,15 +460,15 @@ Updates ship by bumping the plugin `version`; users pull them with
 
 The **Claude adapter** registers five lifecycle events across ten hook entries. Nine of
 them invoke the *same* dispatcher —
-`${CLAUDE_PLUGIN_ROOT}/scripts/coord.sh` (via `${CLAUDE_PLUGIN_ROOT}` so the
-install location doesn't matter). `coord.sh` sources `bus.sh`, `ledger.sh`, and
+`${CLAUDE_PLUGIN_ROOT}/scripts/swarm.sh` (via `${CLAUDE_PLUGIN_ROOT}` so the
+install location doesn't matter). `swarm.sh` sources `bus.sh`, `ledger.sh`, and
 `guard.sh` as **libraries** and runs their phases in-process, so a hook event
 costs one shell rather than one shell per subsystem. The tenth entry —
 `skill-activation.sh` on `UserPromptSubmit` — is a separate, stateless script
 (merged in from skillkit at 4.0.0), invoked directly rather than through
-`coord.sh`:
+`swarm.sh`:
 
-| Event                | Matcher                            | Script / `coord.sh` subcommand | Phases run, in order                                                     |
+| Event                | Matcher                            | Script / `swarm.sh` subcommand | Phases run, in order                                                     |
 | -------------------- | ---------------------------------- | ----------------------- | ------------------------------------------------------------------------ |
 | `SessionStart`     | —                                 | `session-start`       | bus `start` → ledger `start`                                       |
 | `UserPromptSubmit` | —                                 | `prompt-submit`       | bus `task` → ledger `prompt`                                       |
@@ -506,7 +495,7 @@ different phase (Bash needs guard's `absorb`, Task needs `subagent-stop`, the
 rest need `record`).
 
 Guard runs *before* the bus on `pretool-write`, and a deny **short-circuits** —
-`coord.sh` exits without running the bus check at all, since a soft "someone else
+`swarm.sh` exits without running the bus check at all, since a soft "someone else
 touched this" warning adds nothing to a call that's already been stopped. In warn
 mode guard's check is a no-op and the bus check always runs.
 

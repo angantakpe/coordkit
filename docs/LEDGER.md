@@ -1,6 +1,7 @@
 # How the ledger works
 
-`plugins/coordkit/scripts/ledger.sh` is coordkit's shared-context layer.
+`packages/coordkit-core/scripts/ledger.sh` is coordkit's shared-context
+layer.
 It sits **on top of** the bus (`docs/BUS.md`) — it reuses the bus's per-repo
 heartbeats (`.coordkit-bus/agents/<sid>.json`) to decide whether a session is
 still alive, but it answers a different question. The bus tells you *who else
@@ -22,10 +23,10 @@ only appended. Each event carries:
 ```
 
 The full field-by-field contract lives in
-`plugins/coordkit/schema/event.schema.json` — read that file for the
-authoritative, currently-accurate description of what's implemented vs.
-reserved for later (`sig` and `supersedes` remain reserved; the documented
-`clock`-based transport ordering is live for shared modes).
+`packages/protocol/event.schema.json` — read that file for the authoritative,
+currently-accurate description of what's implemented vs. reserved for later
+(`sig` and `supersedes` remain reserved; the documented `clock`-based transport
+ordering is live for shared modes).
 
 `type` is one of `note | decision | question | answer | task | claim | done |
 block` (readers tolerate unknown types as opaque notes, so this isn't a
@@ -91,7 +92,7 @@ liveness is the bus's job, the ledger only asks it the question.
 
 Everything above describes the primitives; nothing runs them for you — a
 human calls `/led next` by hand, one task at a time. `cobus swarm <N>`
-(`plugins/coordkit/scripts/swarm.sh`) is that, automated: it spawns `N`
+(`packages/coordkit-core/scripts/worker-runtime.sh`) is that, automated: it spawns `N`
 worker loops that each repeatedly call `next`, "execute" whatever they claim,
 and report the outcome back to the ledger, until the queue looks drained (a
 handful of consecutive empty polls, each backed off 2-5s — no hot-looping) or
@@ -263,7 +264,7 @@ behind a shared `logstore_*` interface in `transports/lib.sh`; see
 `plugins/coordkit/transports/README.md` for how those work. The important
 property for the ledger's own logic: **the read path is identical regardless
 of transport** — `resolve_root()`, dedup, and ordering all come from the one
-canonical `plugins/coordkit/scripts/common.sh`, so direct mode and logstore
+canonical `packages/coordkit-core/scripts/common.sh`, so direct mode and logstore
 mode can never resolve to two different `.coordkit-bus` trees.
 
 ## 6. CLI / command reference

@@ -9,7 +9,7 @@ phase="${1:-}"
 input="$(cat)"
 ROOT="${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}"
 
-[ -f "${ROOT}/scripts/coord.sh" ] || exit 0
+[ -f "${ROOT}/scripts/swarm.sh" ] || exit 0
 
 if [ -n "${PLUGIN_ROOT:-}" ] || [ "${COORDKIT_HOST:-}" = codex ]; then
   printf '%s' "$input" | bash "${ROOT}/adapters/codex/hook.sh" "$phase"
@@ -21,7 +21,7 @@ export COORDKIT_HOST="${COORDKIT_HOST:-claude-code}"
 
 case "$phase" in
   prompt-submit)
-    printf '%s' "$input" | bash "${ROOT}/scripts/coord.sh" prompt-submit
+    printf '%s' "$input" | bash "${ROOT}/scripts/swarm.sh" prompt-submit
     # Skill auto-activation is a Claude compatibility feature. Codex performs
     # native skill selection and therefore never pays for this second context.
     printf '%s' "$input" | bash "${ROOT}/scripts/skill-activation.sh"
@@ -31,7 +31,7 @@ case "$phase" in
     # if a newer Claude host also recognizes the native Codex event names.
     ;;
   *)
-    printf '%s' "$input" | bash "${ROOT}/scripts/coord.sh" "$phase"
+    printf '%s' "$input" | bash "${ROOT}/scripts/swarm.sh" "$phase"
     ;;
 esac
 

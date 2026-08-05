@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# coord.sh — THE hook dispatcher. Every coordkit hook is one call to this file.
+# swarm.sh — THE hook dispatcher. Every coordkit hook is one call to this file.
 #
 # Before 3.0.0 the coordkit and coordguard plugins registered six overlapping
 # hook commands between them, each re-execing a whole bash script and re-parsing
@@ -43,7 +43,7 @@
 # Defensive throughout: always exits 0 so a bug here can never wedge a session.
 set -uo pipefail
 
-CK_ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}"
+CK_ROOT="${COORDKIT_CORE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}"
 
 # A missing library means a broken install — exit 0 (allow) rather than run on
 # with half the coordination layer loaded.
@@ -229,7 +229,7 @@ ck_refresh_agent_catalog() {
   local runtime="${CK_ROOT}/scripts/agent-runtime.py" output agents_dir error_file
   local error_tmp message generated_at
   output="$(ck_data_dir)/agents/catalog.json"
-  agents_dir="${COORDKIT_AGENT_DIR:-${CK_ROOT}/agents}"
+  agents_dir="${COORDKIT_AGENT_DIR:-$(ck_plugin_root)/agents}"
   error_file="$(dirname "$output")/catalog.error.json"
   mkdir -p "$(dirname "$output")" 2>/dev/null || return 0
   error_tmp="$(mktemp "${TMPDIR:-/tmp}/coordkit-agent-catalog.XXXXXX" 2>/dev/null || true)"

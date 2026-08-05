@@ -178,7 +178,7 @@ Skill activation in coordkit is deliberately narrow. It does **not**:
 - Detect whether Claude actually invoked the suggested skill
 
 coordkit *does* register `SessionStart`, `PreToolUse`, `PostToolUse` and
-`SessionEnd` hooks in the same `hooks.json`, but those run `coord.sh` for the
+`SessionEnd` hooks in the same `hooks.json`, but those run `swarm.sh` for the
 coordination bus and anti-clobber guard. They are unrelated to skill activation.
 
 ---

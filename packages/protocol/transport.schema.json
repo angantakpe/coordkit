@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coordkit/schema/transport/1.0",
+  "title": "coordkit transport family",
+  "description": "Logical transport family for the same coordination history. Transport changes where the data lives and how it replicates, not what the protocol means.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["mode", "storage", "replication", "delivery"],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["local", "git", "relay"],
+      "description": "Selected transport mode."
+    },
+    "storage": {
+      "type": "string",
+      "description": "Where the history is persisted."
+    },
+    "replication": {
+      "type": "string",
+      "description": "How the history reaches peers."
+    },
+    "delivery": {
+      "type": "string",
+      "description": "Whether delivery is immediate, queued, or replayed."
+    }
+  }
+}

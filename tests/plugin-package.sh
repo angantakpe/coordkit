@@ -10,8 +10,8 @@ HOOKS="${PLUGIN}/hooks/hooks.json"
 # manifest also keeps the package compatible with the strict plugin validator.
 jq -e 'has("hooks") | not' "$MANIFEST" >/dev/null
 jq -e '.skills == "./skills/"' "$MANIFEST" >/dev/null
-test "$(jq -r '.version' "$MANIFEST")" = "5.2.0"
-test "$(jq -r '.version' "$PLUGIN/.claude-plugin/plugin.json")" = "5.2.0"
+test "$(jq -r '.version' "$MANIFEST")" = "5.2.1"
+test "$(jq -r '.version' "$PLUGIN/.claude-plugin/plugin.json")" = "5.2.1"
 test -f "$HOOKS"
 jq -e '
   .hooks.PreToolUse[].hooks[].command
@@ -20,6 +20,7 @@ jq -e '
 test -x "$PLUGIN/adapters/hook.sh"
 test -x "$PLUGIN/scripts/repo-memory-gate.sh"
 test -x "$PLUGIN/scripts/agent-runtime.py"
+COORDKIT_PLUGIN_ROOT="$PLUGIN" "$PLUGIN/bin/cobus" swarm --help >/dev/null
 test -f "$PLUGIN/skills/agent-orchestrator/SKILL.md"
 test "$(find "$PLUGIN/agents" -maxdepth 1 -name '*.md' | wc -l)" -eq 10
 test -f "$PLUGIN/agents/work-graph-planner.md"
