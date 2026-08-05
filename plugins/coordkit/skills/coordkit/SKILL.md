@@ -5,6 +5,10 @@ description: Operate CoordKit coordination for parallel Codex or Claude sessions
 
 # CoordKit
 
+The command surface is defined once in `../../commands/README.md` and then
+wrapped by host-specific surfaces. Claude Code exposes slash-command wrappers;
+Codex exposes the same intents through this skill and the shared CLI.
+
 Resolve the plugin root as the directory two levels above this `SKILL.md`.
 Run the bundled scripts from that root; do not assume `cobus` is on `PATH`.
 

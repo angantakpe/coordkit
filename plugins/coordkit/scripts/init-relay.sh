@@ -38,11 +38,7 @@ ck_toml_set_top "$toml" mode relay
 ck_toml_set_top "$toml" room_id "$room"
 ck_toml_set_top "$toml" relay_url "$url"
 
-gi="${repo}/.gitignore"
-if [ ! -f "$gi" ]; then
-  printf '# coordkit: local-only coordination state\n' > "$gi"
-fi
-grep -qxF '/.coordkit-bus/' "$gi" 2>/dev/null || printf '/.coordkit-bus/\n' >> "$gi"
+ck_git_info_exclude_add "$repo" '/.coordkit-bus/'
 
 echo "coordkit init-relay: relay pointer configured for ${repo}"
 echo "  endpoint = ${url}"
@@ -54,4 +50,4 @@ echo "  1) export COORDKIT_RELAY_TOKEN through your shell, keychain, or secret m
 case "$url" in http://*) echo "     local HTTP also requires: export COORDKIT_RELAY_ALLOW_INSECURE_HTTP=1" ;; esac
 echo "  2) review the pointer, then run: cobus trust"
 echo "  3) verify delivery with: cobus relay-sync"
-echo "  4) commit .claude/coord/coord.toml .claude/coord/MANIFEST.json .gitignore"
+echo "  4) commit .claude/coord/coord.toml .claude/coord/MANIFEST.json"

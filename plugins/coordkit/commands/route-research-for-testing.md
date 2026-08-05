@@ -1,7 +1,7 @@
 ---
 description: Map edited routes & launch tests
 argument-hint: "[/extra/path …]"
-allowed-tools: Bash(cat:*), Bash(awk:*), Bash(grep:*), Bash(sort:*), Bash(xargs:*), Bash(sed:*)
+allowed-tools: Bash(cat:*), Bash(awk:*), Bash(grep:*), Bash(sort:*), Bash(xargs:*), Bash(sed:*), Task
 model: sonnet
 ---
 
@@ -28,14 +28,15 @@ Follow the numbered steps **exactly**:
    defined wherever the app registers its routers (e.g. `src/app.ts`).
 2. For each final route, output a JSON record with the path, method, expected
    request/response shapes, and valid + invalid payload examples.
-3. **Now call the `Task` tool** using:
+3. Call the `Task` tool with `subagent_type` set to `goal-verifier`. Pass the
+   JSON records as the complete test target and ask it to verify the routes
+   against their expected request/response contracts. Keep the subagent
+   read-only and require command evidence for every verdict.
 
 ```json
 {
-    "tool": "Task",
-    "parameters": {
-        "description": "route smoke tests",
-        "prompt": "Run the auth-route-tester sub-agent on the JSON above."
-    }
+    "subagent_type": "goal-verifier",
+    "description": "route contract verification",
+    "prompt": "Verify the route records above. Run safe smoke checks, report evidence per route, and do not modify code."
 }
 ```

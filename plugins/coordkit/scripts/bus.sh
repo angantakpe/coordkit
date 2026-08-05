@@ -195,6 +195,7 @@ LEDGER_SH="$(ck_plugin_root)/scripts/ledger.sh"
 ensure_dirs() {
   mkdir -p "$agents" "$claims" "$inbox" "$subagents" 2>/dev/null || return 1
   [ -f "${bus}/.gitignore" ] || printf '*\n' > "${bus}/.gitignore" 2>/dev/null
+  ck_git_info_exclude_add "$root" '/.coordkit-bus/'
   return 0
 }
 

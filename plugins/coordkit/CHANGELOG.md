@@ -16,6 +16,36 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## 5.2.0
+
+### Changed
+- Replaced ten unrelated application-development personas with a purpose-built
+  catalog. Five orchestration roles cover planning through verification; five
+  system roles cover coordination state, ledger convergence, transport
+  reliability, host adapters, and context governance.
+- Agent runtime schema v2 makes role family, lifecycle stage, and routing
+  keywords mandatory and filterable. Explicitly named renders now enforce the
+  same filters as automatic routing.
+- Failed session-start compilation now removes stale `catalog.json`, writes a
+  structured `catalog.error.json`, and emits a bounded warning while preserving
+  fail-open hook execution.
+
+## 5.1.0
+
+### Added
+- A host-neutral Markdown agent runtime. `scripts/agent-runtime.py` validates
+  top-level `agents/*.md`, emits a source-digested JSON catalog, ranks candidate
+  roles for a task, and renders a bounded subagent assignment without executing
+  definition content.
+- `cobus agents` commands for catalog validation, inspection, routing, prompt
+  rendering, and compilation.
+- A Codex `$agent-orchestrator` skill that turns the bundled definitions into
+  native Codex subagent assignments while preserving Claude Code's native
+  top-level agent discovery.
+- Session-start catalog compilation under
+  `<plugin-data>/agents/catalog.json`, with runtime and package tests covering
+  malformed definitions, routing, rendering, CLI dispatch, and startup wiring.
+
 ## 5.0.0
 
 ### Added

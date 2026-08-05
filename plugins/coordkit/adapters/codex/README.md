@@ -9,7 +9,8 @@ Packaging and runtime entrypoints:
 - `../../hooks/hooks.json` — default cross-host lifecycle configuration.
 - `../hook.sh` — cross-host dispatcher.
 - `hook.sh` — Codex payload translation into `scripts/coord.sh`.
-- `../../skills/coordkit/` — the Codex command/workflow surface.
+- `../../skills/coordkit/` — the Codex command/workflow surface, which wraps
+  the shared command specs in `../../commands/README.md`.
 
 Codex represents edits as `apply_patch` calls containing one patch string. The
 adapter extracts every Add/Update/Delete/Move path and invokes the shared guard

@@ -2,8 +2,10 @@
 
 This is the shipped adapter for coordkit.
 
-It maps Claude Code's hook events and slash-command surface onto the shared
-coordkit runtime in `../..`.
+It maps Claude Code's hook events and slash-command wrappers onto the shared
+coordkit runtime in `../..`. The actual command behavior lives in
+`../../commands/README.md`; this adapter only provides the Claude-specific
+packaging and front door.
 
 Current packaging entrypoints:
 

@@ -1,0 +1,54 @@
+{
+  "name": "coordkit-core",
+  "version": 1,
+  "domain": {
+    "entities": [
+      "peer",
+      "session",
+      "heartbeat",
+      "claim",
+      "message",
+      "task",
+      "ledger_event",
+      "collision",
+      "relay"
+    ],
+    "relationships": [
+      {
+        "from": "peer",
+        "to": "session",
+        "kind": "hosts"
+      },
+      {
+        "from": "session",
+        "to": "heartbeat",
+        "kind": "emits"
+      },
+      {
+        "from": "session",
+        "to": "claim",
+        "kind": "creates"
+      },
+      {
+        "from": "session",
+        "to": "message",
+        "kind": "sends"
+      },
+      {
+        "from": "session",
+        "to": "task",
+        "kind": "claims"
+      },
+      {
+        "from": "ledger_event",
+        "to": "task",
+        "kind": "projects"
+      },
+      {
+        "from": "relay",
+        "to": "ledger_event",
+        "kind": "replicates"
+      }
+    ]
+  }
+}

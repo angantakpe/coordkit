@@ -1,16 +1,123 @@
 # coordkit
 
-A host-adapter marketplace for multi-instance coding-agent coordination. It
+CoordKit is infrastructure for coordinating multiple coding agents working on
+the same repository, not an autonomous software-delivery system by itself. It
 packages a working coordination core so it becomes installable, shareable, and
 semver-versioned instead of a hand-wired set of host-specific hook scripts.
 This repository ships Claude Code and Codex adapters as one plugin named
 `coordkit`, plus an optional authenticated relay server for cross-machine use.
 
+## What CoordKit actually does
+
+CoordKit acts like a coordination layer between coding-agent sessions.
+
+When several Claude Code or Codex agents work inside one repository, CoordKit
+helps them answer:
+
+- Which agents are currently active?
+- What branch are they working on?
+- Which files are they modifying?
+- Are two agents about to edit the same file?
+- What task is each agent handling?
+- How can one agent leave information for another?
+- How can agents coordinate across different computers?
+- What context should be injected into a new agent session?
+
+The shared coordination engine is surfaced as
+[`packages/coordkit-core`](/home/anga/workspace/projects/agents/coordkit/packages/coordkit-core),
+while `plugins/coordkit/` stays focused on host packaging and wrappers.
+
+## The architecture
+
+```text
+Claude Code ─┐
+             ├── Host adapters
+Codex ───────┘
+                    │
+                    ▼
+             CoordKit plugin
+                    │
+       ┌────────────┼────────────┐
+       ▼            ▼            ▼
+     Bus          Ledger        Relay
+ real-time      durable        cross-machine
+ coordination   history        synchronization
+```
+
+1. Bus - current coordination state
+
+The bus handles short-lived, operational information:
+
+- Agent heartbeats
+- Active sessions
+- Current branch
+- File claims
+- Agent inboxes
+- Collision warnings
+
+This is how CoordKit knows that 13 peers are active or that two agents may edit
+the same file.
+
+2. Ledger - durable coordination history
+
+The ledger is an append-only record containing things such as:
+
+- Tasks
+- Decisions
+- Agent notes
+- Status changes
+- Shared context
+- Completed work
+
+The bus answers:
+
+What is happening now?
+
+The ledger answers:
+
+What happened, what was decided, and what remains?
+
+3. Relay - synchronization across machines
+
+Without the relay, coordination is mainly local to the repository or machine.
+
+The relay service allows:
+
+```text
+Laptop A running Claude Code
+             │
+             ▼
+      Authenticated relay
+             ▲
+             │
+Laptop B running Codex
+```
+
+The relay makes the shared state available to agents that are not using the
+same filesystem.
+
+4. Host adapters - Claude Code and Codex integration
+
+Claude Code and Codex expose different extension systems, so CoordKit
+translates its functionality into each host.
+
+Claude Code
+├── hooks
+├── commands
+├── plugin integration
+└── session context injection
+
+Codex
+├── skill integration
+├── translated hooks
+├── session initialization
+└── context injection
+
 It ships **one plugin**:
 
 | Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **coordkit** | 5.0.0   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. Claude Code gets slash commands and skill activation; Codex gets native lifecycle hooks and the `$coordkit` skill. |
+| **coordkit** | 5.2.0   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. The command surface is defined once as shared specs, then exposed through Claude Code slash-command wrappers, Codex skill surfaces, and native agents. |
 
 > **`coordguard` and `skillkit` have both been merged in.** Through 2.x, the
 > hard anti-clobber blocker shipped as a separate `coordguard` package. As of
@@ -36,7 +143,10 @@ under the hood:
 - **[docs/STATUSLINE.md](docs/STATUSLINE.md)** — the Claude statusline badge:
   what it shows, why a manifest cannot wire it, and how to keep it wired.
 - **[docs/HOSTS.md](docs/HOSTS.md)** — the host/adapter split: what belongs to
-  the shared coordination core and what stays adapter-specific.
+  the shared coordination core, what stays adapter-specific, and how shared
+  command specs get wrapped for each host.
+- **[plugins/coordkit/commands/README.md](plugins/coordkit/commands/README.md)** —
+  the shared command-spec source of truth for the command surface.
 - **[Enforcement modes](#enforcement-modes)** (below) — the guard layer: what
   `warn` vs `guard` mode actually do, how the mode is resolved, and the honest
   version of the safety story now that both live in one plugin.
@@ -48,13 +158,54 @@ that maps a specific host's lifecycle events, environment variables, command
 surface, and packaging conventions onto the shared bus, ledger, and guard.
 
 Claude Code and Codex adapters are shipped. Claude's `CLAUDE_*` variables,
-`.claude-plugin/` packaging, and slash commands are adapter details. Codex has
-its own `.codex-plugin/plugin.json`, lifecycle hook schema, `apply_patch`
-translation, native subagent mapping, and `$coordkit` skill. Both use the same
-bus, ledger, guard, schema, transports, and `.coordkit-bus` state. The shared
-runtime accepts `COORDKIT_*`, `CLAUDE_*`, `CODEX_*`, and `GEMINI_*` aliases;
-Gemini remains scaffolded. Each heartbeat records `host`, so warnings identify
-the sibling as `claude-code`, `codex`, `gemini`, or `cli`.
+`.claude-plugin/` packaging, and slash-command wrapper files are adapter
+details. Codex has its own `.codex-plugin/plugin.json`, lifecycle hook schema,
+`apply_patch` translation, native subagent mapping, `$coordkit`, and
+`$agent-orchestrator` skills. Both use the same bus, ledger, guard, schema,
+transports, agent definitions, command specs, and `.coordkit-bus` state. The
+shared runtime accepts `COORDKIT_*`, `CLAUDE_*`, `CODEX_*`, and `GEMINI_*`
+aliases; Gemini remains scaffolded. Each heartbeat records `host`, so warnings
+identify the sibling as `claude-code`, `codex`, `gemini`, or `cli`.
+
+### Portable agent runtime
+
+The files under `plugins/coordkit/agents/*.md` are executable prompt artifacts,
+not documentation. Their YAML frontmatter supplies identity, role family,
+lifecycle stage, and routing context; their Markdown bodies are the role
+instructions. At session start, both shipped host adapters validate and compile them to
+`<plugin-data>/agents/catalog.json`. The catalog includes a digest of every
+source file, so stale or malformed definitions are visible rather than silently
+ignored.
+
+If session-start compilation fails, CoordKit removes the stale catalog, writes
+`<plugin-data>/agents/catalog.error.json`, and emits one bounded warning. Hook
+execution remains fail-open, but consumers cannot mistake an older catalog for
+the current source.
+
+The catalog is deliberately split into two families. The five `orchestration`
+roles form a lifecycle: work-graph planning, conflict-free dispatch, bounded
+implementation, integration, and independent goal verification. The five
+`system` roles diagnose CoordKit's own state, ledger convergence, transports,
+host adapters, and context governor. This keeps reusable workflow responsibilities
+separate from CoordKit maintenance expertise.
+
+Claude Code can invoke the top-level definitions through its native agent
+discovery. Codex uses `$agent-orchestrator`: it ranks the same catalog, renders
+the selected Markdown into a bounded assignment, and passes that assignment to
+a native Codex subagent. The host owns model/tool execution; CoordKit owns
+definition loading, routing, prompt rendering, and lifecycle visibility.
+
+The same runtime is inspectable without either host:
+
+```bash
+cobus agents validate
+cobus agents list
+cobus agents workflow
+cobus agents route --role-type orchestration 'split this feature into safe parallel tasks'
+cobus agents render work-graph-planner --task 'Plan this feature.' --cwd "$PWD"
+```
+
+`render` prints a prompt; it never executes definition or ledger content.
 
 ## Token-efficient context
 

@@ -18,7 +18,7 @@
 # lossless — a one-time copy of append-only files (idempotent; never shrinks a file).
 #
 # It does NOT commit for you (so you can review) and writes NO secrets. After running:
-# `git add .claude/coord .gitignore && git commit`, push, and drive replication with a
+# `git add .claude/coord && git commit`, push, and drive replication with a
 # timer on bin/sync.sh (cron / systemd / a background loop) — NEVER from a hook.
 #
 # Usage: init-git.sh [room_id] [remote]
@@ -48,7 +48,7 @@ repo="$(git -C "$(ck_project_dir)" rev-parse --show-toplevel 2>/dev/null)" || {
 coord="${repo}/.claude/coord"
 mkdir -p "${coord}/log" || { echo "coordkit init-git: cannot create ${coord}" >&2; exit 1; }
 
-# 1) .gitattributes (merge=union backstop) — inert on this branch, since step 4 gitignores
+# 1) .gitattributes (merge=union backstop) — inert on this branch, since step 4 excludes
 #    .claude/coord/log/ so no *.ndjson is ever tracked here; written defensively in case a
 #    user un-ignores it. The load-bearing merge driver lives in the git.sh sync worktree.
 if [ -f "${TPL}/gitattributes" ]; then cp -f "${TPL}/gitattributes" "${coord}/.gitattributes"
@@ -70,29 +70,13 @@ ck_toml_set_top "$toml" mode git || exit 1
 ck_toml_set_top "$toml" room_id "$room" || exit 1
 if [ -n "$remote" ]; then ck_toml_set_top "$toml" remote "$remote" || exit 1; fi
 
-# 4) ensure the project .gitignore keeps local-only coordination state out of the
-#    user's branch. Three entries:
-#      /.coordkit-bus/            ephemeral local bus (heartbeats/activity firehose)
-#      /.claude/coord/log/      the event log — replicated via the private worktree
-#                               on the coordkit/log branch, NEVER committed here
-#      /.claude/coord/.sync/    the private sync worktree itself
-#    Only the committed POINTER (coord.toml/.gitattributes/MANIFEST.json) is shared.
-gi="${repo}/.gitignore"
-_ignore() { # pattern
-  local pat="$1"
-  if [ -f "$gi" ]; then
-    grep -qxF "$pat" "$gi" 2>/dev/null || printf '%s\n' "$pat" >> "$gi"
-  else
-    printf '%s\n' "$pat" > "$gi"
-  fi
-}
-[ -f "$gi" ] && ! grep -q '^# coordkit:' "$gi" 2>/dev/null && \
-  printf '\n# coordkit: local-only coordination state (never shared on your branch)\n' >> "$gi"
-[ -f "$gi" ] || printf '# coordkit: local-only coordination state (never shared on your branch)\n' > "$gi"
-_ignore '/.coordkit-bus/'
-_ignore '/.claude/coord/log/'
-_ignore '/.claude/coord/.sync/'
-_ignore '/.claude/coord/.coord.lock*'
+# 4) ensure Git excludes the local-only coordination state from the user's
+#    working tree without changing the tracked .gitignore. This is written to the
+#    repo-local .git/info/exclude so the ignore rule stays local to this clone.
+ck_git_info_exclude_add "$repo" '/.coordkit-bus/'
+ck_git_info_exclude_add "$repo" '/.claude/coord/log/'
+ck_git_info_exclude_add "$repo" '/.claude/coord/.sync/'
+ck_git_info_exclude_add "$repo" '/.claude/coord/.coord.lock*'
 
 # 5) migrate any prior LOCAL-mode log into the git-mode tree so local→git is lossless.
 #    Append-only files: copy each per-actor segment when the destination is missing or
@@ -123,11 +107,11 @@ echo "coordkit init-git: git mode enabled for ${repo}"
 echo "  room_id = ${room}"
 echo "  committed pointer: ${coord}/coord.toml (mode=git)"
 echo "  merge driver:      ${coord}/.gitattributes (*.ndjson merge=union)"
-echo "  log (gitignored):  ${coord}/log/  → replicated on branch '${COORDKIT_SYNC_BRANCH:-coordkit/log}' via ${coord}/.sync"
+echo "  log (excluded locally):  ${coord}/log/  → replicated on branch '${COORDKIT_SYNC_BRANCH:-coordkit/log}' via ${coord}/.sync"
 echo
 echo "Next steps:"
-echo "  1) git add .claude/coord .gitignore && git commit -m 'coordkit: enable git-mode coordination'"
-echo "     (this commits only the pointer — the log under .claude/coord/log/ is gitignored)"
+echo "  1) git add .claude/coord && git commit -m 'coordkit: enable git-mode coordination'"
+echo "     (this commits only the pointer — the log under .claude/coord/log/ is excluded locally)"
 echo "  2) push, and have teammates pull — they auto-join (the committed coord.toml self-describes)."
 echo "  3) drive replication OUT of the hook path on a timer, e.g.:"
 echo "       watch -n15 '${ROOT_PLUGIN}/bin/sync.sh'    # or cron / systemd timer / a background loop"

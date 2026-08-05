@@ -220,32 +220,78 @@ ck_utf8_prefix_bytes() { # <text> <max-bytes>
   fi
 }
 
-# Human-facing command hint for hook messages. Keep host detection independent
-# from branding or application names: renaming an app must not change either
-# identity or the command surface that a hook recommends.
+ck_command_catalog_file() {
+  local root package_root
+  root="$(ck_plugin_root)"
+  package_root="${COORDKIT_CORE_ROOT:-${root}/packages/coordkit-core}"
+  if [ -f "${package_root}/commands/catalog.json" ]; then
+    printf '%s' "${package_root}/commands/catalog.json"
+  else
+    printf '%s' "${root}/commands/catalog.json"
+  fi
+}
+
+ck_command_surface() { # <command-name> [host]
+  local command="$1" host="${2:-$(ck_host)}" catalog
+  catalog="$(ck_command_catalog_file)"
+  [ -f "$catalog" ] || return 1
+  command="${command,,}"
+  case "$host" in
+    claude|claude-code|claude_code) host="claude-code" ;;
+    codex) host="codex" ;;
+    gemini) host="gemini" ;;
+    cli|shell) host="cli" ;;
+    *) host="cli" ;;
+  esac
+  jq -r --arg command "$command" --arg host "$host" '
+    .commands[$command].surfaces[$host]
+    // .commands[$command].surfaces.default
+    // empty
+  ' "$catalog" 2>/dev/null
+}
+
+ck_command_surface_or() { # <command-name> [host] <fallback>
+  local command="$1" host="${2:-}" fallback="${3:-}" value=""
+  if [ -n "$host" ] && [ -n "$fallback" ]; then
+    value="$(ck_command_surface "$command" "$host" 2>/dev/null || true)"
+  elif [ -n "$host" ]; then
+    value="$(ck_command_surface "$command" "$host" 2>/dev/null || true)"
+  else
+    value="$(ck_command_surface "$command" 2>/dev/null || true)"
+    fallback="$fallback"
+  fi
+  [ -n "$value" ] || value="$fallback"
+  printf '%s' "$value"
+}
+
+# Human-facing command hint for hook messages. Prefer the shared command
+# catalog, and fall back to a neutral verb if the registry is unavailable.
+# Renaming a host should not change the coordination hint surface.
 ck_coordination_hint() { # [target sid8]
   local target="${1:-<sid8>}"
-  case "$(ck_host)" in
-    codex)       printf 'Use $coordkit to inspect the bus or message %s.' "$target" ;;
-    claude-code) printf 'Run /bus to inspect the bus or /msg %s to coordinate.' "$target" ;;
-    *)           printf 'Run cobus digest, or bus.sh msg %s, to coordinate.' "$target" ;;
-  esac
+  local dashboard msg
+  dashboard="$(ck_command_surface dashboard 2>/dev/null || true)"
+  msg="$(ck_command_surface message 2>/dev/null || true)"
+  [ -n "$dashboard" ] || dashboard="coordkit dashboard"
+  [ -n "$msg" ] || msg="coordkit msg"
+  printf 'Use %s to inspect the bus or %s %s to coordinate.' "$dashboard" "$msg" "$target"
 }
 
 ck_digest_command() {
-  case "$(ck_host)" in
-    codex)       printf '$coordkit' ;;
-    claude-code) printf '/ctx' ;;
-    *)           printf 'cobus digest' ;;
-  esac
+  local value
+  value="$(ck_command_surface context 2>/dev/null || true)"
+  [ -n "$value" ] || value="coordkit digest"
+  printf '%s' "$value"
 }
 
 ck_ledger_hint() {
-  case "$(ck_host)" in
-    codex)       printf 'use $coordkit to write or inspect shared context' ;;
-    claude-code) printf 'write: /led note|decide|task|claim|done · take work: /led next · full view: /ctx' ;;
-    *)           printf 'use cobus note|decide|task|claim|done|next|digest' ;;
-  esac
+  local ledger context
+  ledger="$(ck_command_surface ledger 2>/dev/null || true)"
+  context="$(ck_command_surface context 2>/dev/null || true)"
+  [ -n "$ledger" ] || ledger="coordkit ledger"
+  [ -n "$context" ] || context="coordkit digest"
+  printf 'write: %s note|decide|task|claim|done · take work: %s next · full view: %s' \
+    "$ledger" "$ledger" "$context"
 }
 
 # Atomically set one flat key before the first TOML table. Transport setup must
@@ -285,6 +331,24 @@ ck_coord_toml() {
   local root="${1:-$(resolve_root "$PWD")}"
   if ck_first_env COORDKIT_COORD_TOML CLAUDE_COORD_TOML CODEX_COORD_TOML GEMINI_COORD_TOML; then return 0; fi
   printf '%s/coord.toml' "$(ck_coord_dir "$root")"
+}
+
+ck_git_info_exclude_file() {
+  local root="${1:-$(resolve_root "$PWD")}" path=""
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    path="$(git -C "$root" rev-parse --git-path info/exclude 2>/dev/null || true)"
+  fi
+  [ -n "$path" ] || return 1
+  printf '%s' "$path"
+}
+
+ck_git_info_exclude_add() { # <repo-root> <pattern>
+  local root="$1" pattern="$2" exclude
+  exclude="$(ck_git_info_exclude_file "$root" 2>/dev/null || true)"
+  [ -n "$exclude" ] || return 0
+  mkdir -p "$(dirname "$exclude")" 2>/dev/null || return 0
+  [ -f "$exclude" ] || : > "$exclude"
+  grep -qxF "$pattern" "$exclude" 2>/dev/null || printf '%s\n' "$pattern" >> "$exclude"
 }
 
 # --------------------------------------------------------------------------- #

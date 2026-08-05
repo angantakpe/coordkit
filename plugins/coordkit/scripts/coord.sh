@@ -225,6 +225,37 @@ ck_emit_context() {  # <hookEventName> [json_blob ...]
 event="${1:-}"
 input="$(cat)"
 
+ck_refresh_agent_catalog() {
+  local runtime="${CK_ROOT}/scripts/agent-runtime.py" output agents_dir error_file
+  local error_tmp message generated_at
+  output="$(ck_data_dir)/agents/catalog.json"
+  agents_dir="${COORDKIT_AGENT_DIR:-${CK_ROOT}/agents}"
+  error_file="$(dirname "$output")/catalog.error.json"
+  mkdir -p "$(dirname "$output")" 2>/dev/null || return 0
+  error_tmp="$(mktemp "${TMPDIR:-/tmp}/coordkit-agent-catalog.XXXXXX" 2>/dev/null || true)"
+  [ -n "$error_tmp" ] || return 0
+
+  if command -v python3 >/dev/null 2>&1 && [ -f "$runtime" ] \
+    && python3 "$runtime" --agents-dir "$agents_dir" compile --output "$output" \
+      >/dev/null 2>"$error_tmp"; then
+    rm -f "$error_file" "$error_tmp" 2>/dev/null || true
+    return 0
+  fi
+
+  message="$(tr '\n' ' ' < "$error_tmp" 2>/dev/null | cut -c1-400)"
+  [ -n "$message" ] || message="python3 or the agent runtime is unavailable"
+  generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date)"
+  rm -f "$output" 2>/dev/null || true
+  jq -nc --arg generated_at "$generated_at" --arg message "$message" \
+    '{valid:false,generated_at:$generated_at,message:$message}' \
+    > "${error_file}.tmp.$$" 2>/dev/null \
+    && mv -f "${error_file}.tmp.$$" "$error_file" 2>/dev/null
+  rm -f "$error_tmp" "${error_file}.tmp.$$" 2>/dev/null || true
+  jq -nc --arg context \
+    "[coordkit agents] catalog unavailable; stale catalog removed: ${message}. Run cobus agents validate." \
+    '{hookSpecificOutput:{additionalContext:$context}}' 2>/dev/null || true
+}
+
 case "$event" in
   session-start)
     # statusline_drift_note is read-only and usually silent: it speaks up only
@@ -234,20 +265,24 @@ case "$event" in
     if [ -n "$tmpdir" ]; then
       bus_out="${tmpdir}/bus"
       ledger_out="${tmpdir}/ledger"
+      catalog_out="${tmpdir}/catalog"
+      ck_refresh_agent_catalog >"$catalog_out" & catalog_pid=$!
       bus_run start <<<"$input" >"$bus_out" & bus_pid=$!
       ledger_run start <<<"$input" >"$ledger_out" & ledger_pid=$!
       wait "$bus_pid" 2>/dev/null || true
       wait "$ledger_pid" 2>/dev/null || true
+      wait "$catalog_pid" 2>/dev/null || true
       ck_emit_context SessionStart \
         "$(cat "$bus_out" 2>/dev/null)" \
         "$(cat "$ledger_out" 2>/dev/null)" \
-        "$(statusline_drift_note)"
+        "$(cat "$catalog_out" 2>/dev/null; statusline_drift_note)"
       rm -rf "$tmpdir" 2>/dev/null || true
     else
+      catalog_note="$(ck_refresh_agent_catalog)"
       ck_emit_context SessionStart \
         "$(bus_run    start <<<"$input")" \
         "$(ledger_run start <<<"$input")" \
-        "$(statusline_drift_note)"
+        "$(printf '%s\n' "$catalog_note"; statusline_drift_note)"
     fi
     ;;
 

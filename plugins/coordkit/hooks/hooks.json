@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" session-start",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" session-start",
             "timeout": 10,
             "statusMessage": "Joining the CoordKit bus",
             "additionalContextLimit": 800
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" prompt-submit",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" prompt-submit",
             "timeout": 10,
             "additionalContextLimit": 400
           }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" pretool-write",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" pretool-write",
             "timeout": 10,
             "statusMessage": "Checking CoordKit file ownership",
             "additionalContextLimit": 200
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" pretool-bash",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" pretool-bash",
             "timeout": 10
           }
         ]
@@ -54,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" pretool-task",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" pretool-task",
             "timeout": 10
           }
         ]
@@ -66,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" posttool-write",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" posttool-write",
             "timeout": 10
           }
         ]
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" posttool-bash",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" posttool-bash",
             "timeout": 10
           }
         ]
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" posttool-task",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" posttool-task",
             "timeout": 10
           }
         ]
@@ -97,7 +97,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" subagent-start",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" subagent-start",
             "timeout": 5,
             "additionalContextLimit": 200
           }
@@ -109,7 +109,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" subagent-stop",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" subagent-stop",
             "timeout": 5
           }
         ]
@@ -120,7 +120,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.sh\" session-end",
+            "command": "bash \"${COORDKIT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/adapters/hook.sh\" session-end",
             "timeout": 3
           }
         ]

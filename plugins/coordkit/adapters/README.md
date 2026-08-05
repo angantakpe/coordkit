@@ -3,9 +3,10 @@
 coordkit is split into a shared coordination core plus host-specific adapter
 slots.
 
-The shared core lives in `scripts/`, `transports/`, `schema/`, and the shared
-docs. Each adapter directory describes how a host maps its lifecycle events,
-packaging format, environment variables, and command surface onto that core.
+The shared core lives in `scripts/`, `transports/`, `schema/`, the shared docs,
+and `commands/`. Each adapter directory describes how a host maps its lifecycle
+events, packaging format, environment variables, and command surface onto that
+core.
 
 Adapter status in this repository:
 

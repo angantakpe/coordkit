@@ -10,9 +10,28 @@ HOOKS="${PLUGIN}/hooks/hooks.json"
 # manifest also keeps the package compatible with the strict plugin validator.
 jq -e 'has("hooks") | not' "$MANIFEST" >/dev/null
 jq -e '.skills == "./skills/"' "$MANIFEST" >/dev/null
+test "$(jq -r '.version' "$MANIFEST")" = "5.2.0"
+test "$(jq -r '.version' "$PLUGIN/.claude-plugin/plugin.json")" = "5.2.0"
 test -f "$HOOKS"
+jq -e '
+  .hooks.PreToolUse[].hooks[].command
+  | test("\\$\\{COORDKIT_PLUGIN_ROOT:-\\$\\{PLUGIN_ROOT:-\\$\\{CLAUDE_PLUGIN_ROOT\\}\\}\\}")
+' "$HOOKS" >/dev/null
 test -x "$PLUGIN/adapters/hook.sh"
 test -x "$PLUGIN/scripts/repo-memory-gate.sh"
+test -x "$PLUGIN/scripts/agent-runtime.py"
+test -f "$PLUGIN/skills/agent-orchestrator/SKILL.md"
+test "$(find "$PLUGIN/agents" -maxdepth 1 -name '*.md' | wc -l)" -eq 10
+test -f "$PLUGIN/agents/work-graph-planner.md"
+test -f "$PLUGIN/agents/goal-verifier.md"
+test -f "$PLUGIN/agents/transport-reliability-debugger.md"
+test -z "$(find "$PLUGIN/agents" -maxdepth 1 -type f \( \
+  -name 'auth-route-debugger.md' -o -name 'auth-route-tester.md' -o \
+  -name 'auto-error-resolver.md' -o -name 'code-architecture-reviewer.md' -o \
+  -name 'code-refactor-master.md' -o -name 'documentation-architect.md' -o \
+  -name 'frontend-error-fixer.md' -o -name 'plan-reviewer.md' -o \
+  -name 'refactor-planner.md' -o -name 'web-research-specialist.md' \
+\) -print -quit)"
 
 # Spill thresholds are a last line of defence, not the context budget itself.
 jq -e '

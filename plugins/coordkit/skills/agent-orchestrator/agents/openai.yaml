@@ -1,0 +1,4 @@
+interface:
+  display_name: "CoordKit Agent Orchestrator"
+  short_description: "Run staged Markdown subagent workflows"
+  default_prompt: "Use CoordKit's agent catalog to plan, dispatch, execute, integrate, or verify this work with the right bounded subagent."

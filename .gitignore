@@ -1,8 +1,3 @@
-# coordkit emits runtime state into a repo's .coordkit-bus / .claude/coord, never
-# into the packaged marketplace. This repo also dogfoods coordkit, so its own
-# live .coordkit-bus/ shows up here — ignore it explicitly rather than relying on
-# the runtime-generated .coordkit-bus/.gitignore that coordkit drops at runtime.
-/.coordkit-bus/
 .DS_Store
 *.swp
 

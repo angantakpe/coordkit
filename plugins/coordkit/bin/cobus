@@ -67,6 +67,9 @@ Setup / transport:
                               COORDKIT_SWARM_EXEC=1 + COORDKIT_SWARM_CMD opts
                               into really executing tasks. `cobus swarm --help`
                               for the full contract.
+  agents <command>            validate, list, route, render, or compile the
+                              bundled Markdown subagent definitions. Run
+                              `cobus agents --help` for the runtime contract.
 EOF
 }
 
@@ -85,6 +88,7 @@ case "${1:-}" in
   gc)       shift; exec bash "${ROOT}/scripts/gc.sh" "$@" ;;
   fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;
   swarm)    shift; exec bash "${ROOT}/scripts/swarm.sh" "$@" ;;
+  agents)   shift; exec python3 "${ROOT}/scripts/agent-runtime.py" "$@" ;;
 esac
 
 if [ ! -x "$LEDGER" ]; then

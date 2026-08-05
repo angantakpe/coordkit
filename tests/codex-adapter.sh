@@ -17,6 +17,13 @@ hook() {
 start="$(jq -nc --arg cwd "$tmp" '{session_id:"codex-one",cwd:$cwd,hook_event_name:"SessionStart",source:"startup",model:"test"}')"
 hook session-start "$start" >/dev/null
 jq -e '.host == "codex" and .sid == "codex-one"' "$tmp/.coordkit-bus/agents/codex-one.json" >/dev/null
+jq -e '
+  .schema_version == 2
+  and (.agents | length) == 10
+  and ([.agents[] | select(.role_type == "orchestration")] | length) == 5
+  and ([.agents[] | select(.role_type == "system")] | length) == 5
+' "$tmp/plugin-data/agents/catalog.json" >/dev/null
+test ! -e "$tmp/plugin-data/agents/catalog.error.json"
 COORDKIT_PLUGIN_ROOT="$PLUGIN" COORDKIT_PLUGIN_DATA="$tmp/plugin-data" \
   COORDKIT_PROJECT_DIR="$tmp" COORDKIT_SESSION_ID=codex-one COORDKIT_HOST=codex \
   bash "$PLUGIN/scripts/ledger.sh" note "host identity" >/dev/null

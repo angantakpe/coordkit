@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "commands": {
+    "dashboard": {
+      "description": "Show live sessions, file claims, and collisions in the current repo.",
+      "surfaces": {
+        "claude-code": "/bus",
+        "codex": "$coordkit bus",
+        "gemini": "coordkit bus",
+        "cli": "cobus dashboard"
+      }
+    },
+    "context": {
+      "description": "Show the shared-context ledger, task board, and recent events.",
+      "surfaces": {
+        "claude-code": "/ctx",
+        "codex": "$coordkit",
+        "gemini": "coordkit digest",
+        "cli": "cobus digest"
+      }
+    },
+    "ledger": {
+      "description": "Write or inspect shared notes, decisions, questions, and tasks.",
+      "surfaces": {
+        "claude-code": "/led",
+        "codex": "$coordkit ledger",
+        "gemini": "coordkit ledger",
+        "cli": "cobus"
+      }
+    },
+    "claim": {
+      "description": "Claim work on the shared task board and show the resulting queue.",
+      "surfaces": {
+        "claude-code": "/claim",
+        "codex": "$coordkit claim",
+        "gemini": "coordkit claim",
+        "cli": "cobus claim"
+      }
+    },
+    "fleet": {
+      "description": "Show other repos on this machine that currently have live CoordKit sessions.",
+      "surfaces": {
+        "claude-code": "/fleet",
+        "codex": "$coordkit fleet",
+        "gemini": "coordkit fleet",
+        "cli": "cobus fleet"
+      }
+    },
+    "message": {
+      "description": "Deliver a message to another live instance in the same repo.",
+      "surfaces": {
+        "claude-code": "/msg",
+        "codex": "$coordkit msg",
+        "gemini": "coordkit msg",
+        "cli": "cobus msg"
+      }
+    },
+    "guard": {
+      "description": "Report or change the current anti-clobber enforcement mode.",
+      "surfaces": {
+        "claude-code": "/guard",
+        "codex": "$coordkit guard",
+        "gemini": "coordkit guard",
+        "cli": "cobus guard"
+      }
+    },
+    "statusline-setup": {
+      "description": "Install or verify the command-center statusline badge.",
+      "surfaces": {
+        "claude-code": "/statusline-setup",
+        "codex": "$coordkit statusline-setup",
+        "gemini": "coordkit statusline-setup",
+        "cli": "cobus statusline-setup"
+      }
+    },
+    "dev-docs": {
+      "description": "Refresh project documentation before a context reset.",
+      "surfaces": {
+        "claude-code": "/dev-docs",
+        "codex": "$coordkit dev-docs",
+        "gemini": "coordkit dev-docs",
+        "cli": "cobus dev-docs"
+      }
+    },
+    "dev-docs-update": {
+      "description": "Update active development notes and unfinished work before compaction.",
+      "surfaces": {
+        "claude-code": "/dev-docs-update",
+        "codex": "$coordkit dev-docs-update",
+        "gemini": "coordkit dev-docs-update",
+        "cli": "cobus dev-docs-update"
+      }
+    },
+    "route-research-for-testing": {
+      "description": "Route route-contract research into a read-only verification workflow.",
+      "surfaces": {
+        "claude-code": "/route-research-for-testing",
+        "codex": "$coordkit route-research-for-testing",
+        "gemini": "coordkit route-research-for-testing",
+        "cli": "cobus route-research-for-testing"
+      }
+    }
+  }
+}
