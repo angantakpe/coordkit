@@ -77,6 +77,29 @@ file_event() { # <tool-name> <absolute-path>
   ' 2>/dev/null
 }
 
+record_guard_reads() {
+  local file
+  [ "$#" -gt 0 ] || return 0
+  ROOT="$ROOT" CODEX_PLUGIN_ROOT="$ROOT" COORDKIT_PLUGIN_ROOT="$ROOT" \
+    COORDKIT_HOST="codex" COORDKIT_PROJECT_DIR="$cwd" CODEX_PROJECT_DIR="$cwd" \
+    COORDKIT_SESSION_ID="$sid" CODEX_SESSION_ID="$sid" \
+    bash -s -- "$@" <<'EOF'
+set -uo pipefail
+ROOT="${COORDKIT_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2>/dev/null && pwd)}}}"
+[ -f "${ROOT}/scripts/guard.sh" ] || exit 0
+# shellcheck source=../scripts/common.sh
+. "${ROOT}/scripts/common.sh" 2>/dev/null || exit 0
+# shellcheck source=../scripts/guard.sh
+. "${ROOT}/scripts/guard.sh" 2>/dev/null || exit 0
+for file in "$@"; do
+  [ -n "$file" ] || continue
+  ev="$(jq -nc --arg cwd "$COORDKIT_PROJECT_DIR" --arg sid "$COORDKIT_SESSION_ID" --arg file "$file" \
+    '{session_id:$sid,cwd:$cwd,tool_input:{file_path:$file}}' 2>/dev/null)" || continue
+  guard_record "$ev" >/dev/null
+done
+EOF
+}
+
 emit_pretool_results() {
   local raw="$1" deny
   [ -n "$raw" ] || return 0
@@ -118,11 +141,8 @@ case "$phase" in
     # arguments from conservative read-only commands so guard mode has a real
     # "last observed" fingerprint instead of denying every first patch forever.
     if command -v python3 >/dev/null 2>&1; then
-      while IFS= read -r file; do
-        [ -n "$file" ] || continue
-        ev="$(file_event Read "$file")"
-        [ -n "$ev" ] && run_coord posttool-write "$ev" >/dev/null
-      done < <(printf '%s' "$input" | python3 "${ROOT}/adapters/codex/extract-read-paths.py" 2>/dev/null)
+      mapfile -t read_paths < <(printf '%s' "$input" | python3 "${ROOT}/adapters/codex/extract-read-paths.py" 2>/dev/null)
+      [ "${#read_paths[@]}" -gt 0 ] && record_guard_reads "${read_paths[@]}"
     fi
     ;;
   pretool-write)
