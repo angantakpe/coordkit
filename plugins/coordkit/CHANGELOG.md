@@ -16,6 +16,18 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## Unreleased
+
+### Changed
+- Promoted the coordination engine into an explicit `packages/coordkit-core`
+  package, with a shared command catalog and core domain manifest so the
+  architecture is visible outside the plugin wrappers.
+- Moved repo-local `.coordkit-bus` exclusion into code paths that update
+  `.git/info/exclude`, so the checkout no longer relies on a tracked root
+  `.gitignore` entry for runtime state.
+- Updated the README with a plain-language architecture, domain breakdown, and
+  the operator-facing role of the bus, ledger, relay, and host adapters.
+
 ## 5.2.0
 
 ### Changed
