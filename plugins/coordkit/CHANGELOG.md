@@ -80,7 +80,7 @@ entries are no longer on disk but remain in git history
 - A bundled `$coordkit` Codex skill for bus, fleet, ledger, messaging, guard,
   and relay operations.
 - Host-attributed heartbeats, ledger events, and messages. New records carry
-  `host: claude-code|codex|gemini|cli`; session, collision, guard, dashboard,
+  `host: claude-code|codex|cli`; session, collision, guard, dashboard,
   and subagent output identifies the owning runtime. Old records render as
   `unknown`.
 - A production-capable relay protocol and dependency-free Node 20+ server:

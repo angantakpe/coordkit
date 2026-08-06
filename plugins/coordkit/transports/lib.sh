@@ -57,7 +57,7 @@
 # fall back to this file's own location (lib.sh lives in transports/).
 __logstore_transports_dir() {
   local root
-  for root in "${COORDKIT_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}" "${CODEX_PLUGIN_ROOT:-}" "${GEMINI_PLUGIN_ROOT:-}"; do
+  for root in "${COORDKIT_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}" "${CODEX_PLUGIN_ROOT:-}"; do
     [ -n "$root" ] && [ -d "$root/transports" ] && { printf '%s' "$root/transports"; return 0; }
   done
   # BASH_SOURCE[0] inside a function = the file where the function is defined.
@@ -69,7 +69,7 @@ __logstore_transports_dir() {
 # (lib.sh lives in transports/, so common.sh is ../scripts/common.sh).
 __logstore_common() {
   local root
-  for root in "${COORDKIT_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}" "${CODEX_PLUGIN_ROOT:-}" "${GEMINI_PLUGIN_ROOT:-}"; do
+  for root in "${COORDKIT_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}" "${CODEX_PLUGIN_ROOT:-}"; do
     [ -n "$root" ] && [ -f "$root/scripts/common.sh" ] && { printf '%s' "$root/scripts/common.sh"; return 0; }
   done
   printf '%s/../scripts/common.sh' "$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd )"
@@ -83,10 +83,9 @@ __logstore_common() {
 # scripts/common.sh, so the ledger's own state and the transport's segment state
 # can never split across two different trees. Precedence:
 #
-#   COORDKIT_BUS_ROOT / CLAUDE_BUS_ROOT / CODEX_BUS_ROOT / GEMINI_BUS_ROOT >
+#   COORDKIT_BUS_ROOT / CLAUDE_BUS_ROOT / CODEX_BUS_ROOT >
 #   git toplevel > nearest ancestor with .coordkit-bus/ >
-#   COORDKIT_PROJECT_DIR / CLAUDE_PROJECT_DIR / CODEX_PROJECT_DIR /
-#   GEMINI_PROJECT_DIR > cwd
+#   COORDKIT_PROJECT_DIR / CLAUDE_PROJECT_DIR / CODEX_PROJECT_DIR > cwd
 #
 # The transport has no cwd argument to thread through — it always resolves
 # relative to the process's own $PWD, which is what the ledger passes down too.

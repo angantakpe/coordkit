@@ -23,10 +23,10 @@ helps them answer:
 - How can agents coordinate across different computers?
 - What context should be injected into a new agent session?
 
-The shared coordination runtime is surfaced through the `packages/` layer, and
-`plugins/coordkit/` stays focused on host packaging and wrappers.
-The actual runtime scripts live in `packages/core/scripts`; the
-plugin-side files are thin wrappers around that package.
+The canonical coordination runtime lives in `packages/core/scripts`.
+`plugins/coordkit/scripts` contains synchronized distribution copies so the
+installed plugin remains self-contained inside a versioned host cache; package
+tests reject drift between those two trees.
 
 ## The architecture
 
@@ -167,9 +167,9 @@ details. Codex has its own `.codex-plugin/plugin.json`, lifecycle hook schema,
 `apply_patch` translation, native subagent mapping, `$coordkit`, and
 `$agent-orchestrator` skills. Both use the same bus, ledger, guard, schema,
 transports, agent definitions, command specs, and `.coordkit-bus` state. The
-shared runtime accepts `COORDKIT_*`, `CLAUDE_*`, `CODEX_*`, and `GEMINI_*`
-aliases; Gemini remains scaffolded. Each heartbeat records `host`, so warnings
-identify the sibling as `claude-code`, `codex`, `gemini`, or `cli`.
+shared runtime accepts `COORDKIT_*`, `CLAUDE_*`, and `CODEX_*` aliases. Each
+heartbeat records `host`, so warnings identify the sibling as `claude-code`,
+`codex`, or `cli`.
 
 ### Portable agent runtime
 

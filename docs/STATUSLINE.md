@@ -8,9 +8,8 @@ coordkit now ships to mitigate it, and what stays manual permanently.
 
 ## 1. What the badge prints
 
-`bus.sh badge` (see `packages/core/scripts/bus.sh`, with
-`plugins/coordkit/scripts/bus.sh` as the compatibility wrapper, the `badge`
-phase) does
+`bus.sh badge` (canonical source in `packages/core/scripts/bus.sh`, synchronized
+distribution copy in `plugins/coordkit/scripts/bus.sh`) does
 two things per statusline refresh:
 
 1. **A throttled heartbeat tick.** If this session's own heartbeat is older than

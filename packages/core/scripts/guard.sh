@@ -94,7 +94,6 @@ _guard_tree_name() {
   if [ -n "${COORDKIT_GUARD_TREE:-}" ]; then printf '%s' "$COORDKIT_GUARD_TREE"; return 0; fi
   if [ -n "${CLAUDE_GUARD_TREE:-}" ]; then printf '%s' "$CLAUDE_GUARD_TREE"; return 0; fi
   if [ -n "${CODEX_GUARD_TREE:-}" ]; then printf '%s' "$CODEX_GUARD_TREE"; return 0; fi
-  if [ -n "${GEMINI_GUARD_TREE:-}" ]; then printf '%s' "$GEMINI_GUARD_TREE"; return 0; fi
   # Renaming this default only orphans an upgrading session's old state dir
   # (per-session, cache-resident, re-adopted on the next Read) — nothing durable
   # is keyed on the literal name.
@@ -138,13 +137,13 @@ _guard_statedir() { printf '%s/%s' "$(_guard_base)" "$(_guard_sid "${1:-}")"; }
 # (whole-second mtime alone would miss it). Prefer GNU nanosecond mtime, fall back
 # to whole-second (GNU then BSD); prefer GNU size, fall back to BSD size.
 _guard_fingerprint() {
-  local f="$1" mt="" sz=""
-  mt="$(stat -c %.Y "$f" 2>/dev/null)"                  # GNU, nanosecond
-  [ -z "$mt" ] && mt="$(stat -c %Y "$f" 2>/dev/null)"   # GNU, whole second
-  [ -z "$mt" ] && mt="$(stat -f %m "$f" 2>/dev/null)"   # BSD, whole second
-  sz="$(stat -c %s "$f" 2>/dev/null)"                   # GNU size
-  [ -z "$sz" ] && sz="$(stat -f %z "$f" 2>/dev/null)"   # BSD size
-  printf '%s:%s' "$mt" "$sz"
+  local f="$1" fingerprint=""
+  # One stat process per file matters here: Bash hooks may fingerprint dozens
+  # of tracked files, and the former separate mtime/size calls dominated the
+  # 10-second hook budget under load.
+  fingerprint="$(stat -c '%.Y:%s' "$f" 2>/dev/null)"       # GNU
+  [ -z "$fingerprint" ] && fingerprint="$(stat -f '%m:%z' "$f" 2>/dev/null)" # BSD
+  printf '%s' "$fingerprint"
 }
 
 # Derive a filesystem-safe key for a path. Try the hashers that actually exist on
@@ -356,6 +355,42 @@ guard_record() {
   return 0
 }
 
+guard_record_files() { # <hook_json> <absolute-file>...
+  local input="${1:-}" statedir file ev
+  shift || true
+  [ "$#" -gt 0 ] || return 0
+  statedir="$(_guard_statedir "$input")"
+  mkdir -p "$statedir" 2>/dev/null || return 0
+  touch "$statedir" 2>/dev/null
+  if command -v python3 >/dev/null 2>&1 && python3 - "$statedir" "$@" <<'PY'
+import hashlib
+import os
+import sys
+
+state_dir, *paths = sys.argv[1:]
+for path in paths:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        continue
+    key = hashlib.sha1(os.fsencode(path)).hexdigest()
+    fingerprint = f"{stat.st_mtime_ns // 1_000_000_000}.{stat.st_mtime_ns % 1_000_000_000:09d}:{stat.st_size}"
+    try:
+        with open(os.path.join(state_dir, key), "w", encoding="utf-8", errors="surrogateescape") as handle:
+            handle.write(f"{fingerprint}\n{path}")
+    except OSError:
+        pass
+PY
+  then
+    return 0
+  fi
+  for file in "$@"; do
+    ev="$(printf '%s' "$input" | jq -c --arg file "$file" '.tool_input = {file_path:$file}' 2>/dev/null)"
+    [ -n "$ev" ] && guard_record "$ev"
+  done
+  return 0
+}
+
 # Pair the two halves of one Bash call by tool_use_id where the host provides it;
 # otherwise share one slot (parallel Bash calls then degrade to the old
 # deny-and-re-Read behavior at worst, never to a wrong allow of sibling edits).
@@ -368,20 +403,95 @@ _guard_snappath() {  # <statedir> <hook_json>
   printf '%s/.bashsnap.%s' "$1" "$snapid"
 }
 
+_guard_batch_scan() { # <snapshot|absorb> <state-dir> <snapshot-file>
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1" "$2" "$3" <<'PY'
+import os
+import sys
+
+mode, state_dir, snapshot = sys.argv[1:]
+
+def read_record(path):
+    try:
+        with open(path, encoding="utf-8", errors="surrogateescape") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return None
+    return lines[:2] if len(lines) >= 2 else None
+
+def fingerprint(path):
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return ""
+    return f"{stat.st_mtime_ns // 1_000_000_000}.{stat.st_mtime_ns % 1_000_000_000:09d}:{stat.st_size}"
+
+if mode == "snapshot":
+    keys = []
+    try:
+        entries = os.scandir(state_dir)
+    except OSError:
+        sys.exit(1)
+    with entries:
+        for entry in entries:
+            if entry.name.startswith(".") or not entry.is_file(follow_symlinks=False):
+                continue
+            record = read_record(entry.path)
+            if not record:
+                continue
+            seen, path = record
+            if path and os.path.isfile(path) and fingerprint(path) == seen:
+                keys.append(entry.name)
+    try:
+        with open(snapshot, "w", encoding="utf-8") as handle:
+            handle.writelines(f"{key}\n" for key in keys)
+    except OSError:
+        sys.exit(1)
+elif mode == "absorb":
+    try:
+        with open(snapshot, encoding="utf-8") as handle:
+            keys = handle.read().splitlines()
+    except OSError:
+        sys.exit(1)
+    for key in keys:
+        if not key or key.startswith(".") or "/" in key or os.sep in key:
+            continue
+        record_path = os.path.join(state_dir, key)
+        record = read_record(record_path)
+        if not record:
+            continue
+        seen, path = record
+        current = fingerprint(path) if path and os.path.isfile(path) else ""
+        if current and current != seen:
+            try:
+                with open(record_path, "w", encoding="utf-8", errors="surrogateescape") as handle:
+                    handle.write(f"{current}\n{path}")
+            except OSError:
+                pass
+else:
+    sys.exit(1)
+PY
+}
+
 # guard_snapshot <hook_json> — record which tracked files are still clean right
 # before a Bash call runs. Always returns 0.
 guard_snapshot() {
   local input="${1:-}" statedir snap tmp rec path seen cur
+  local -a record=()
   statedir="$(_guard_statedir "$input")"
   [ -d "$statedir" ] || return 0
   snap="$(_guard_snappath "$statedir" "$input")"
   tmp="${snap}.tmp.$$"
+  if _guard_batch_scan snapshot "$statedir" "$tmp"; then
+    mv -f "$tmp" "$snap" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
   : > "$tmp" 2>/dev/null || return 0
   for rec in "$statedir"/*; do
     [ -f "$rec" ] || continue
-    path="$(sed -n '2p' "$rec" 2>/dev/null)"
+    record=(); mapfile -t record < "$rec" 2>/dev/null || continue
+    seen="${record[0]:-}"; path="${record[1]:-}"
     [ -n "$path" ] && [ -f "$path" ] || continue   # old-format or vanished — skip
-    seen="$(head -n1 "$rec" 2>/dev/null)"
     cur="$(_guard_fingerprint "$path")"
     [ -n "$cur" ] && [ "$cur" = "$seen" ] && printf '%s\n' "${rec##*/}" >> "$tmp"
   done
@@ -393,17 +503,22 @@ guard_snapshot() {
 # window. Only files that were clean at snapshot time are eligible. Always 0.
 guard_absorb() {
   local input="${1:-}" statedir snap k rec path seen cur
+  local -a record=()
   statedir="$(_guard_statedir "$input")"
   [ -d "$statedir" ] || return 0
   snap="$(_guard_snappath "$statedir" "$input")"
   [ -f "$snap" ] || return 0
+  if _guard_batch_scan absorb "$statedir" "$snap"; then
+    rm -f "$snap" 2>/dev/null
+    return 0
+  fi
   while IFS= read -r k; do
     case "$k" in ""|.*|*/*) continue ;; esac        # our own keys are plain hashes
     rec="${statedir}/${k}"
     [ -f "$rec" ] || continue
-    path="$(sed -n '2p' "$rec" 2>/dev/null)"
+    record=(); mapfile -t record < "$rec" 2>/dev/null || continue
+    seen="${record[0]:-}"; path="${record[1]:-}"
     [ -n "$path" ] && [ -f "$path" ] || continue
-    seen="$(head -n1 "$rec" 2>/dev/null)"
     cur="$(_guard_fingerprint "$path")"
     if [ -n "$cur" ] && [ "$cur" != "$seen" ]; then
       printf '%s\n%s' "$cur" "$path" > "$rec" 2>/dev/null
@@ -476,14 +591,15 @@ _guard_drift_who() {
 guard_driftreport() {
   local input="${1:-}" statedir rec path seen cur
   local -a drifted=()
+  local -a record=()
   statedir="$(_guard_statedir "$input")"
   [ -d "$statedir" ] || return 0   # fresh session (or nothing Read/written yet) — nothing to report
 
   for rec in "$statedir"/*; do
     [ -f "$rec" ] || continue
-    path="$(sed -n '2p' "$rec" 2>/dev/null)"
+    record=(); mapfile -t record < "$rec" 2>/dev/null || continue
+    seen="${record[0]:-}"; path="${record[1]:-}"
     [ -n "$path" ] || continue      # old-format record (no path line) — nothing to compare
-    seen="$(head -n1 "$rec" 2>/dev/null)"
     cur="$(_guard_fingerprint "$path")"
     [ -n "$cur" ] && [ "$cur" = "$seen" ] && continue   # unchanged since we last saw it (also true if the file vanished AND we somehow stored an empty fingerprint, which guard_record never does)
     drifted+=("$path")

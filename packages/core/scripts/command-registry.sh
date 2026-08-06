@@ -10,7 +10,7 @@ set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
-ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}"
+ROOT="${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}"
 # shellcheck source=./common.sh
 . "${ROOT}/scripts/common.sh" 2>/dev/null || exit 0
 
@@ -22,7 +22,6 @@ normalize_host() {
   case "${1:-}" in
     claude|claude-code|claude_code) printf 'claude-code' ;;
     codex) printf 'codex' ;;
-    gemini) printf 'gemini' ;;
     cli|shell) printf 'cli' ;;
     *) printf 'cli' ;;
   esac

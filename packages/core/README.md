@@ -21,5 +21,6 @@ catalog, independent of any host adapter.
 - `domain.json` - machine-readable core domain map.
 - `commands/catalog.json` - shared command-intent catalog.
 
-The plugin wrappers under `plugins/coordkit/` stay host-specific. This package is
-where the coordination engine becomes visible as a first-class unit.
+Host-specific adapters and command wrappers stay under `plugins/coordkit/`.
+Its `scripts/` directory is a synchronized distribution copy of this runtime so
+installed plugins do not depend on files outside their cache.

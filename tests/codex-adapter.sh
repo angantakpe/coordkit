@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN="${ROOT}/plugins/coordkit"
 tmp="$(mktemp -d /tmp/coordkit-codex-test.XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT
+trap 'status=$?; printf "codex-adapter: failed at line %s (exit %s)\n" "$LINENO" "$status" >&2; exit "$status"' ERR
 git -C "$tmp" init -q
 printf 'alpha\n' > "$tmp/demo.txt"
 
@@ -31,6 +32,37 @@ jq -e '.host == "codex" and .sid == "codex-one"' "$tmp/.coordkit-bus/ledger.json
 
 read_event="$(jq -nc --arg cwd "$tmp" '{session_id:"codex-one",cwd:$cwd,hook_event_name:"PostToolUse",tool_name:"Bash",tool_use_id:"read-one",tool_input:{command:"sed -n '\''1,20p'\'' demo.txt"},tool_response:{success:true}}')"
 COORDKIT_ENFORCEMENT=guard hook posttool-bash "$read_event" >/dev/null
+
+# Hook work must scale with batches rather than re-entering the dispatcher for
+# every tracked/read/edited file. Keep this gate below the host's 10s timeout.
+batch_files=()
+for i in $(seq 1 32); do
+  printf 'batch-%s\n' "$i" > "$tmp/batch-$i.txt"
+  batch_files+=("batch-$i.txt")
+done
+batch_read_cmd="cat ${batch_files[*]}"
+batch_pre_bash="$(jq -nc --arg cwd "$tmp" --arg command "$batch_read_cmd" \
+  '{session_id:"codex-one",cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"Bash",tool_use_id:"batch-bash",tool_input:{command:$command}}')"
+batch_post_bash="$(jq -nc --arg cwd "$tmp" --arg command "$batch_read_cmd" \
+  '{session_id:"codex-one",cwd:$cwd,hook_event_name:"PostToolUse",tool_name:"Bash",tool_use_id:"batch-bash",tool_input:{command:$command},tool_response:{success:true}}')"
+PLUGIN_ROOT="$PLUGIN" PLUGIN_DATA="$tmp/plugin-data" COORDKIT_ENFORCEMENT=guard \
+  timeout 5 bash "$PLUGIN/adapters/hook.sh" pretool-bash <<<"$batch_pre_bash" >/dev/null
+PLUGIN_ROOT="$PLUGIN" PLUGIN_DATA="$tmp/plugin-data" COORDKIT_ENFORCEMENT=guard \
+  timeout 5 bash "$PLUGIN/adapters/hook.sh" posttool-bash <<<"$batch_post_bash" >/dev/null
+
+batch_patch='*** Begin Patch'
+for i in $(seq 1 24); do
+  batch_patch+=$'\n*** Update File: batch-'"$i"'.txt'
+done
+batch_patch+=$'\n*** End Patch'
+batch_pre_write="$(jq -nc --arg cwd "$tmp" --arg command "$batch_patch" \
+  '{session_id:"codex-one",cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"apply_patch",tool_use_id:"batch-write",tool_input:{command:$command}}')"
+batch_post_write="$(jq -nc --arg cwd "$tmp" --arg command "$batch_patch" \
+  '{session_id:"codex-one",cwd:$cwd,hook_event_name:"PostToolUse",tool_name:"apply_patch",tool_use_id:"batch-write",tool_input:{command:$command},tool_response:{success:true}}')"
+test -z "$(PLUGIN_ROOT="$PLUGIN" PLUGIN_DATA="$tmp/plugin-data" COORDKIT_ENFORCEMENT=warn \
+  timeout 5 bash "$PLUGIN/adapters/hook.sh" pretool-write <<<"$batch_pre_write")"
+PLUGIN_ROOT="$PLUGIN" PLUGIN_DATA="$tmp/plugin-data" COORDKIT_ENFORCEMENT=warn \
+  timeout 5 bash "$PLUGIN/adapters/hook.sh" posttool-write <<<"$batch_post_write" >/dev/null
 
 patch_event="$(jq -nc --arg cwd "$tmp" '{session_id:"codex-one",cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"apply_patch",tool_use_id:"patch-one",tool_input:{command:"*** Begin Patch\n*** Update File: demo.txt\n@@\n-alpha\n+beta\n*** End Patch"}}')"
 test -z "$(COORDKIT_ENFORCEMENT=guard hook pretool-write "$patch_event")"

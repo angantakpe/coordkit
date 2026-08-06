@@ -53,6 +53,10 @@ ck_protocol_root() {
     ( cd "${core_root}/../protocol" 2>/dev/null && pwd )
     return 0
   fi
+  if [ -d "${core_root}/protocol" ]; then
+    ( cd "${core_root}/protocol" 2>/dev/null && pwd )
+    return 0
+  fi
   printf '%s' "${core_root}/../protocol"
 }
 
@@ -71,25 +75,25 @@ ck_protocol_schema_path() {
 }
 
 ck_plugin_root() {
-  if ck_first_env COORDKIT_PLUGIN_ROOT CLAUDE_PLUGIN_ROOT CODEX_PLUGIN_ROOT GEMINI_PLUGIN_ROOT; then return 0; fi
+  if ck_first_env COORDKIT_PLUGIN_ROOT CLAUDE_PLUGIN_ROOT CODEX_PLUGIN_ROOT; then return 0; fi
   ( cd "$(dirname "${BASH_SOURCE[0]}")/../../../plugins/coordkit" 2>/dev/null && pwd )
 }
 
 # Persistent, cross-repo plugin data dir (site.json, clock.state, trust.json).
 ck_data_dir() {
-  if ck_first_env COORDKIT_DATA COORDKIT_PLUGIN_DATA CLAUDE_PLUGIN_DATA CODEX_PLUGIN_DATA GEMINI_PLUGIN_DATA; then return 0; fi
+  if ck_first_env COORDKIT_DATA COORDKIT_PLUGIN_DATA CLAUDE_PLUGIN_DATA CODEX_PLUGIN_DATA; then return 0; fi
   printf '%s' "$HOME/.claude/coordkit-data"
 }
 
 # Repo-scoped helpers that accept both the neutral COORDKIT_* adapter names and
 # the legacy CLAUDE_* names used by the current plugin runtime.
 ck_project_dir() {
-  if ck_first_env COORDKIT_PROJECT_DIR CLAUDE_PROJECT_DIR CODEX_PROJECT_DIR GEMINI_PROJECT_DIR; then return 0; fi
+  if ck_first_env COORDKIT_PROJECT_DIR CLAUDE_PROJECT_DIR CODEX_PROJECT_DIR; then return 0; fi
   printf '%s' "${PWD:-.}"
 }
 
 ck_session_id() {
-  if ck_first_env COORDKIT_SESSION_ID CLAUDE_SESSION_ID CODEX_SESSION_ID GEMINI_SESSION_ID; then return 0; fi
+  if ck_first_env COORDKIT_SESSION_ID CLAUDE_SESSION_ID CODEX_SESSION_ID; then return 0; fi
   printf 'cli'
 }
 
@@ -214,11 +218,9 @@ ck_host() {
   case "$h" in
     claude|claude-code) printf 'claude-code'; return ;;
     codex)              printf 'codex'; return ;;
-    gemini)             printf 'gemini'; return ;;
     cli)                printf 'cli'; return ;;
   esac
   [ -n "${CODEX_SESSION_ID:-}" ]  && { printf 'codex'; return; }
-  [ -n "${GEMINI_SESSION_ID:-}" ] && { printf 'gemini'; return; }
   [ -n "${CLAUDE_SESSION_ID:-}" ] && { printf 'claude-code'; return; }
   # Claude Code hook payloads carry session_id on stdin and do not guarantee a
   # CLAUDE_SESSION_ID environment variable. Its plugin root is therefore the
@@ -269,7 +271,6 @@ ck_command_surface() { # <command-name> [host]
   case "$host" in
     claude|claude-code|claude_code) host="claude-code" ;;
     codex) host="codex" ;;
-    gemini) host="gemini" ;;
     cli|shell) host="cli" ;;
     *) host="cli" ;;
   esac
@@ -353,13 +354,13 @@ ck_toml_set_top() { # <file> <key> <string-value>
 
 ck_coord_dir() {
   local root="${1:-$(resolve_root "$PWD")}"
-  if ck_first_env COORDKIT_COORD_DIR CLAUDE_COORD_DIR CODEX_COORD_DIR GEMINI_COORD_DIR; then return 0; fi
+  if ck_first_env COORDKIT_COORD_DIR CLAUDE_COORD_DIR CODEX_COORD_DIR; then return 0; fi
   printf '%s/.claude/coord' "$root"
 }
 
 ck_coord_toml() {
   local root="${1:-$(resolve_root "$PWD")}"
-  if ck_first_env COORDKIT_COORD_TOML CLAUDE_COORD_TOML CODEX_COORD_TOML GEMINI_COORD_TOML; then return 0; fi
+  if ck_first_env COORDKIT_COORD_TOML CLAUDE_COORD_TOML CODEX_COORD_TOML; then return 0; fi
   printf '%s/coord.toml' "$(ck_coord_dir "$root")"
 }
 
@@ -383,10 +384,9 @@ ck_git_info_exclude_add() { # <repo-root> <pattern>
 
 # --------------------------------------------------------------------------- #
 # resolve_root <cwd> — THE repo-root rule. Precedence:
-#   COORDKIT_BUS_ROOT / CLAUDE_BUS_ROOT / CODEX_BUS_ROOT / GEMINI_BUS_ROOT >
+#   COORDKIT_BUS_ROOT / CLAUDE_BUS_ROOT / CODEX_BUS_ROOT >
 #   git toplevel > nearest ancestor with .coordkit-bus/ >
-#   COORDKIT_PROJECT_DIR / CLAUDE_PROJECT_DIR / CODEX_PROJECT_DIR /
-#   GEMINI_PROJECT_DIR > cwd
+#   COORDKIT_PROJECT_DIR / CLAUDE_PROJECT_DIR / CODEX_PROJECT_DIR > cwd
 #
 # The git-toplevel-before-project-dir order matters in a workspace of nested git
 # repos under a non-git parent project dir: preferring the workspace dir there
@@ -425,7 +425,7 @@ ck_main_worktree() {
 resolve_root() {
   local cwd="$1" top main dir
   # explicit pin wins over everything — lets sibling non-git subdirs share one bus
-  if ck_first_env COORDKIT_BUS_ROOT CLAUDE_BUS_ROOT CODEX_BUS_ROOT GEMINI_BUS_ROOT; then return; fi
+  if ck_first_env COORDKIT_BUS_ROOT CLAUDE_BUS_ROOT CODEX_BUS_ROOT; then return; fi
   top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
   if [ -n "$top" ]; then
     main="$(ck_main_worktree "$cwd")"
@@ -437,7 +437,7 @@ resolve_root() {
     [ -d "$dir/.coordkit-bus" ] && { printf '%s' "$dir"; return; }
     dir="$(dirname "$dir")"
   done
-  if ck_first_env COORDKIT_PROJECT_DIR CLAUDE_PROJECT_DIR CODEX_PROJECT_DIR GEMINI_PROJECT_DIR; then return; fi
+  if ck_first_env COORDKIT_PROJECT_DIR CLAUDE_PROJECT_DIR CODEX_PROJECT_DIR; then return; fi
   printf '%s' "$cwd"
 }
 
@@ -518,7 +518,7 @@ ck_toml_table_get() {  # <file> <table> <key>
 # "which precedence level supplied it?" (what /guard status reports).
 _ck_enforcement_resolve() {
   local v toml f
-  v="$(ck_first_env COORDKIT_ENFORCEMENT CLAUDE_ENFORCEMENT CODEX_ENFORCEMENT GEMINI_ENFORCEMENT | tr '[:upper:]' '[:lower:]')"
+  v="$(ck_first_env COORDKIT_ENFORCEMENT CLAUDE_ENFORCEMENT CODEX_ENFORCEMENT | tr '[:upper:]' '[:lower:]')"
   case "$v" in
     guard|warn) printf '%s|env COORDKIT_ENFORCEMENT' "$v"; return ;;
   esac

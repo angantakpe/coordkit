@@ -20,6 +20,21 @@ jq -e '
 test -x "$PLUGIN/adapters/hook.sh"
 test -x "$PLUGIN/scripts/repo-memory-gate.sh"
 test -x "$PLUGIN/scripts/agent-runtime.py"
+for runtime in "$ROOT/packages/core/scripts"/*; do
+  name="${runtime##*/}"
+  cmp -s "$runtime" "$PLUGIN/scripts/$name" || {
+    printf 'plugin runtime drift: packages/core/scripts/%s != plugins/coordkit/scripts/%s\n' "$name" "$name" >&2
+    exit 1
+  }
+done
+for protocol in "$ROOT/packages/protocol"/*; do
+  name="${protocol##*/}"
+  [ -f "$protocol" ] || continue
+  cmp -s "$protocol" "$PLUGIN/protocol/$name" || {
+    printf 'plugin protocol drift: packages/protocol/%s != plugins/coordkit/protocol/%s\n' "$name" "$name" >&2
+    exit 1
+  }
+done
 COORDKIT_PLUGIN_ROOT="$PLUGIN" "$PLUGIN/bin/cobus" swarm --help >/dev/null
 test -f "$PLUGIN/skills/agent-orchestrator/SKILL.md"
 test "$(find "$PLUGIN/agents" -maxdepth 1 -name '*.md' | wc -l)" -eq 10

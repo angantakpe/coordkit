@@ -37,7 +37,7 @@ _CK_STATUSLINE_SH=1
 
 # A missing common.sh means a broken install; do nothing rather than run on.
 # shellcheck source=./common.sh
-. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}/scripts/common.sh" || return 0 2>/dev/null
+. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}/scripts/common.sh" || return 0 2>/dev/null
 
 # The host's config dir. CLAUDE_CONFIG_DIR is Claude Code's own override; the
 # COORDKIT_ alias keeps this testable against a scratch dir without touching a

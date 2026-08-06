@@ -40,8 +40,7 @@ coordkit/
 │
 ├── adapters/
 │   ├── claude-code/
-│   ├── codex/
-│   └── gemini/
+│   └── codex/
 │
 ├── plugins/
 │   └── coordkit/
@@ -77,8 +76,7 @@ coordkit/
   services.
 - `packages/transport-local/`, `packages/transport-git/`, and
   `packages/transport-relay/` move events between storage backends.
-- `adapters/` contains host integration shims for Claude Code, Codex, and
-  Gemini.
+- `adapters/` contains host integration shims for Claude Code and Codex.
 - `plugins/coordkit/` is the packaging layer for the shipped plugin and thin
   wrappers around the shared runtime.
 - `tests/` is split by intent so unit, integration, contract, and end-to-end
@@ -88,11 +86,12 @@ coordkit/
 
 ## Current shape
 
-The current repository now places the relay service under `apps/relay/` and the
-shared runtime scripts under `packages/core/scripts/`, with
-`plugins/coordkit/scripts/` kept as wrappers. That is a meaningful step toward
-the target boundary, but it is still not the full package split described
-above.
+The current repository places the relay service under `apps/relay/` and the
+canonical shared runtime under `packages/core/scripts/`.
+`plugins/coordkit/scripts/` contains checked-in distribution copies because
+host plugin installers copy only that plugin directory into their versioned
+caches. Package tests require those copies to match the canonical runtime. This
+is still not the full package split described above.
 
 `packages/protocol/` now exists as the explicit home for the protocol contract
 itself. It is still paired with the current shell-based schema and runtime, but

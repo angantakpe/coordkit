@@ -6,9 +6,9 @@ than the ledger (`docs/LEDGER.md`): no event sourcing, just per-session
 heartbeat files and a soft-lock convention, refreshed on every hook.
 
 The bus is not invoked directly by hooks. Every lifecycle event goes to the
-single dispatcher `plugins/coordkit/scripts/swarm.sh`, which is now a thin
-wrapper over the runtime in `packages/core/scripts/swarm.sh`. That
-runtime sources `bus.sh`, `ledger.sh`, and `guard.sh` as libraries and runs
+single dispatcher `swarm.sh`. Its canonical source lives under
+`packages/core/scripts/`, with a synchronized self-contained distribution copy
+under `plugins/coordkit/scripts/`. The dispatcher sources `bus.sh`, `ledger.sh`, and `guard.sh` as libraries and runs
 their phases in-process — so one hook event costs one shell, not one per
 subsystem. This doc covers only the bus's phases; see [§8](#8-the-bus-and-guard-mode)
 for where guard fits.
@@ -42,7 +42,7 @@ by `prune_dead()` if the owning heartbeat goes hard-stale, so a crashed
 session can't leave a phantom "still running" record behind. It's what powers
 the SUBAGENTS lines in `/bus` (§7) and the same-type heads-up described there.
 
-`host` is adapter identity (`claude-code`, `codex`, `gemini`, or `cli`). It is
+`host` is adapter identity (`claude-code`, `codex`, or `cli`). It is
 included in session, collision, guard-attribution, and subagent messages so an
 operator can tell which runtime owns a claim. Pre-5.0 heartbeat files without
 the field render as `unknown`.
@@ -168,8 +168,8 @@ default, see its own `--help`), and `cobus fleet` (same as `/fleet`).
 
 Through coordkit 2.x, the hard anti-clobber blocker was a **separate plugin**
 (`coordguard`) that you installed alongside coordkit. As of **3.0.0** the
-implementation lives in `packages/core/scripts/guard.sh`, with
-`plugins/coordkit/scripts/guard.sh` kept as a wrapper for compatibility. The
+canonical implementation lives in `packages/core/scripts/guard.sh`, with a
+synchronized distribution copy in `plugins/coordkit/scripts/guard.sh`. The
 same runtime is reached by the shared `swarm.sh` dispatcher. Full details —
 the `warn` vs `guard` modes, how the mode is resolved from env / `coord.toml`
 / per-user config, `/guard on|off|status`, and the fail-open discipline —

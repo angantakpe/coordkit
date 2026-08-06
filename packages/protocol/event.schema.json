@@ -39,7 +39,7 @@
     },
     "sid":    { "type": "string", "description": "Originating host session id." },
     "sid8":   { "type": "string", "description": "First 8 chars of sid (display)." },
-    "host":   { "type": "string", "enum": ["claude-code", "codex", "gemini", "cli"], "description": "Producer host adapter identity. Derived from adapter/runtime signals and independent of any user-facing app name." },
+    "host":   { "type": "string", "enum": ["claude-code", "codex", "cli"], "description": "Producer host adapter identity. Derived from adapter/runtime signals and independent of any user-facing app name." },
     "user":   { "type": "string", "description": "Advisory producer metadata stamped locally from $USER. Relay bearer grants authenticate access to a room, but the server deliberately preserves the content-addressed event unchanged and therefore does not rewrite this field. Do not use event.user for authorization." },
     "branch": { "type": "string", "description": "Git branch at write time (or \"no-git\")." },
     "type": {

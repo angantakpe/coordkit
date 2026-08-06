@@ -18,7 +18,6 @@ Current runtime env aliases:
 - `COORDKIT_*`
 - `CLAUDE_*`
 - `CODEX_*`
-- `GEMINI_*`
 
 The shared runtime accepts all four families, but this adapter is the one that
 actually binds Claude Code's host-specific event model today.

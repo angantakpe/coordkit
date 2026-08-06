@@ -225,10 +225,11 @@ prune_dead() {
   return 0   # never let the loop's last test short-circuit `... && heartbeat`
 }
 
-heartbeat() {  # $1=task (or "") $2=file-to-append (or "")
+heartbeat_many() { # $1=task (or "") $2...=files-to-append
   ensure_dirs || return 0
-  local rec="${agents}/${sid}.json" task_set="${1:-}" file_add="${2:-}"
-  local t br prev='{}'; t="$(now)"; br="$curbr"
+  local rec="${agents}/${sid}.json" task_set="${1:-}" files_json
+  local t br prev='{}'; shift || true; t="$(now)"; br="$curbr"
+  files_json="$(jq -nc '$ARGS.positional' --args -- "$@" 2>/dev/null)" || files_json='[]'
   # tmp+mv makes each WRITE atomic, but read-then-write isn't: two callers for
   # the same sid (e.g. the statusline badge tick racing a hook heartbeat) can
   # both read the old record and the loser's field update is lost. Serialize the
@@ -238,17 +239,21 @@ heartbeat() {  # $1=task (or "") $2=file-to-append (or "")
     [ -f "$rec" ] && prev="$(cat "$rec" 2>/dev/null || printf '{}')"
     printf '%s' "$prev" | jq \
       --arg sid "$sid" --arg host "$host" --arg br "$br" --arg cwd "$cwd" \
-      --argjson t "$t" --arg task "$task_set" --arg file "$file_add" '
+      --argjson t "$t" --arg task "$task_set" --argjson files "$files_json" '
         . as $p
         | {sid:$sid, host:$host, branch:$br, cwd:$cwd, last_seen:$t}
         + {task:  ( if $task != "" then $task else ($p.task // "") end )}
-        + {files: ( ($p.files // [])
-                    | if $file != "" then (. + [$file]) else . end
+        + {files: ( (($p.files // []) + $files)
                     | reverse | unique | .[0:8] )}
       ' > "${rec}.tmp" 2>/dev/null && mv "${rec}.tmp" "$rec" 2>/dev/null
   ) 9>"${rec}.lock" 2>/dev/null
   fleet_register
   return 0
+}
+
+heartbeat() { # $1=task (or "") $2=file-to-append (or "")
+  local task="${1:-}" file="${2:-}"
+  if [ -n "$file" ]; then heartbeat_many "$task" "$file"; else heartbeat_many "$task"; fi
 }
 
 # Piggybacks on heartbeat()'s own call frequency — no separate/unthrottled
@@ -387,6 +392,30 @@ notify() {  # best-effort desktop notification; never fails
   fi
 }
 
+check_collision_file() { # <absolute-file>
+  local file="$1" key cf owner cts obr ohost age rel mk do_notify msg collision_bytes
+  [ -n "$file" ] || return 0
+  key="$(hashkey "$file")"
+  cf="${claims}/${key}.json"; [ -f "$cf" ] || return 0
+  IFS=$'\t' read -r owner cts <<< "$(jq -r '[.sid // "", .ts // 0] | @tsv' "$cf" 2>/dev/null)"
+  { [ -z "$owner" ] || [ "$owner" = "$sid" ]; } && return 0
+  agent_live "$owner" || return 0
+  case "${cts:-}" in ''|*[!0-9]*) cts=0 ;; esac
+  [ $(( $(now) - cts )) -gt "$STALE_SOFT" ] && return 0
+  obr="$(jq -r '.branch // "?"' "${agents}/${owner}.json" 2>/dev/null)"
+  ohost="$(jq -r '.host // "unknown"' "${agents}/${owner}.json" 2>/dev/null)"
+  age="$(agent_age "$owner")"; rel="${file#"$root"/}"
+  mk="${bus}/.notify-${key}"; do_notify=1
+  if [ -f "$mk" ]; then [ $(( $(now) - $(mtime "$mk") )) -lt "$NOTIFY_DEBOUNCE" ] && do_notify=0; fi
+  if [ "$do_notify" -eq 1 ]; then : > "$mk" 2>/dev/null; notify "coordkit collision" "${owner:0:8} (${ohost}, branch:${obr}) is also editing ${rel##*/}"; fi
+  rel="$(compact_field "$rel")"
+  msg="CK COLLISION: ${owner:0:8} host=${ohost} br=${obr} edited ${rel} ${age}s ago. Soft warning; reconcile. $(ck_coordination_hint "${owner:0:8}")"
+  collision_bytes=$(( CONTEXT_COLLISION_TOKENS * CONTEXT_BYTES_PER_TOKEN ))
+  msg="$(ck_utf8_prefix_bytes "$msg" "$collision_bytes")"
+  printf '{"systemMessage":%s,"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' \
+    "$(printf '%s' "$msg" | jq -Rs .)" "$(printf '%s' "$msg" | jq -Rs .)"
+}
+
 case "$phase" in
   # ── SessionStart ──────────────────────────────────────────────────────────
   start)
@@ -472,34 +501,42 @@ case "$phase" in
     exit 0
     ;;
 
+  record-batch)
+    mapfile -t files < <(printf '%s' "$input" | jq -r '.tool_input.file_paths[]? // empty' 2>/dev/null)
+    [ "${#files[@]}" -gt 0 ] || exit 0
+    ensure_dirs || exit 0
+    rels=()
+    for file in "${files[@]}"; do
+      [ -n "$file" ] || continue
+      rel="${file#"$root"/}"; rels+=("$rel")
+    done
+    [ "${#rels[@]}" -gt 0 ] || exit 0
+    heartbeat_many "" "${rels[@]}"
+    for file in "${files[@]}"; do
+      [ -n "$file" ] || continue
+      rel="${file#"$root"/}"
+      printf '%s\t%s\tedit\t%s\n' "$(iso)" "$sid8" "$rel" >> "$log" 2>/dev/null
+      key="$(hashkey "$file")"
+      jq -n --arg p "$rel" --arg sid "$sid" --argjson ts "$(now)" \
+        '{path:$p, sid:$sid, ts:$ts}' > "${claims}/${key}.json" 2>/dev/null
+    done
+    if [ -f "$log" ] && [ "$(wc -l < "$log" 2>/dev/null || echo 0)" -gt 600 ]; then
+      tail -n 350 "$log" > "${log}.tmp" 2>/dev/null && mv "${log}.tmp" "$log" 2>/dev/null
+    fi
+    exit 0
+    ;;
+
   # ── PreToolUse soft collision warning (+ desktop notify, debounced) ───────
   check)
     file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)"
-    [ -z "$file" ] && exit 0
-    key="$(hashkey "$file")"
-    cf="${claims}/${key}.json"; [ -f "$cf" ] || exit 0
-    IFS=$'\t' read -r owner cts <<< "$(jq -r '[.sid // "", .ts // 0] | @tsv' "$cf" 2>/dev/null)"
-    { [ -z "$owner" ] || [ "$owner" = "$sid" ]; } && exit 0
-    agent_live "$owner" || exit 0
-    # Warn only about a RECENT touch. The claim survives (the dashboard still
-    # reports it as history), but a sibling that touched this file once an hour
-    # ago and moved on shouldn't warn every edit for the rest of its session.
-    case "${cts:-}" in ''|*[!0-9]*) cts=0 ;; esac
-    [ $(( $(now) - cts )) -gt "$STALE_SOFT" ] && exit 0
-    obr="$(jq -r '.branch // "?"' "${agents}/${owner}.json" 2>/dev/null)"
-    ohost="$(jq -r '.host // "unknown"' "${agents}/${owner}.json" 2>/dev/null)"
-    age="$(agent_age "$owner")"; rel="${file#"$root"/}"
-    # debounced desktop notification
-    mk="${bus}/.notify-${key}"
-    do_notify=1
-    if [ -f "$mk" ]; then [ $(( $(now) - $(mtime "$mk") )) -lt "$NOTIFY_DEBOUNCE" ] && do_notify=0; fi
-    if [ "$do_notify" -eq 1 ]; then : > "$mk" 2>/dev/null; notify "coordkit collision" "${owner:0:8} (${ohost}, branch:${obr}) is also editing ${rel##*/}"; fi
-    rel="$(compact_field "$rel")"
-    msg="CK COLLISION: ${owner:0:8} host=${ohost} br=${obr} edited ${rel} ${age}s ago. Soft warning; reconcile. $(ck_coordination_hint "${owner:0:8}")"
-    collision_bytes=$(( CONTEXT_COLLISION_TOKENS * CONTEXT_BYTES_PER_TOKEN ))
-    msg="$(ck_utf8_prefix_bytes "$msg" "$collision_bytes")"
-    printf '{"systemMessage":%s,"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' \
-      "$(printf '%s' "$msg" | jq -Rs .)" "$(printf '%s' "$msg" | jq -Rs .)"
+    check_collision_file "$file"
+    exit 0
+    ;;
+
+  check-batch)
+    while IFS= read -r file; do
+      check_collision_file "$file"
+    done < <(printf '%s' "$input" | jq -r '.tool_input.file_paths[]? // empty' 2>/dev/null)
     exit 0
     ;;
 

@@ -26,14 +26,13 @@ The runtime now accepts these adapter env families:
 
 - `COORDKIT_*` for the neutral names
 - `CLAUDE_*` for Claude Code
-- `CODEX_*` and `GEMINI_*` as parallel adapter aliases
+- `CODEX_*` for Codex adapter aliases
 
 Adapter slots are tracked under
 [`plugins/coordkit/adapters/`](../plugins/coordkit/adapters/):
 
 - `claude-code/` is shipped and wired to the Claude plugin manifest.
 - `codex/` is shipped and wired to the Codex plugin manifest and hook schema.
-- `gemini/` is scaffolded for a future Gemini host integration.
 
 Adapters set `COORDKIT_HOST`, or the shared runtime infers Claude Code from its
 plugin environment as a compatibility fallback. Heartbeats and newly emitted
@@ -53,7 +52,6 @@ from a terminal.
 What is not generalized yet:
 
 - A host-agnostic manifest format shared across all host runtimes.
-- Host-native event wiring for Gemini.
 - `scripts/skill-activation.sh` (merged in from skillkit at coordkit 4.0.0):
   its rule-file discovery paths (`~/.claude/skills/skill-rules.json`,
   `$CLAUDE_PROJECT_DIR/.claude/skills/skill-rules.json`) are still

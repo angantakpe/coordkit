@@ -69,14 +69,6 @@ patch_paths() {
     | while IFS= read -r path; do absolute_path "$path"; printf '\n'; done
 }
 
-file_event() { # <tool-name> <absolute-path>
-  printf '%s' "$input" | jq -c --arg tn "$1" --arg file "$2" '
-    .tool_name = $tn
-    | .tool_input = {file_path:$file}
-    | .coordkit_adapter = "codex"
-  ' 2>/dev/null
-}
-
 record_guard_reads() {
   local file
   [ "$#" -gt 0 ] || return 0
@@ -91,12 +83,46 @@ ROOT="${COORDKIT_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$
 . "${ROOT}/scripts/common.sh" 2>/dev/null || exit 0
 # shellcheck source=../scripts/guard.sh
 . "${ROOT}/scripts/guard.sh" 2>/dev/null || exit 0
-for file in "$@"; do
-  [ -n "$file" ] || continue
-  ev="$(jq -nc --arg cwd "$COORDKIT_PROJECT_DIR" --arg sid "$COORDKIT_SESSION_ID" --arg file "$file" \
-    '{session_id:$sid,cwd:$cwd,tool_input:{file_path:$file}}' 2>/dev/null)" || continue
-  guard_record "$ev" >/dev/null
-done
+ev="$(jq -nc --arg cwd "$COORDKIT_PROJECT_DIR" --arg sid "$COORDKIT_SESSION_ID" \
+  '{session_id:$sid,cwd:$cwd,tool_input:{}}' 2>/dev/null)" || exit 0
+guard_record_files "$ev" "$@" >/dev/null
+EOF
+}
+
+run_write_batch() { # <pre|post> <absolute-path>...
+  local write_phase="$1"
+  shift
+  [ "$#" -gt 0 ] || return 0
+  ROOT="$ROOT" CODEX_PLUGIN_ROOT="$ROOT" COORDKIT_PLUGIN_ROOT="$ROOT" \
+    COORDKIT_HOST="codex" COORDKIT_PROJECT_DIR="$cwd" CODEX_PROJECT_DIR="$cwd" \
+    COORDKIT_SESSION_ID="$sid" CODEX_SESSION_ID="$sid" \
+    bash -s -- "$write_phase" "$@" <<'EOF'
+set -uo pipefail
+phase="$1"; shift
+ROOT="${COORDKIT_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2>/dev/null && pwd)}}}"
+[ -f "${ROOT}/scripts/common.sh" ] || exit 0
+. "${ROOT}/scripts/common.sh" 2>/dev/null || exit 0
+. "${ROOT}/scripts/bus.sh" 2>/dev/null || exit 0
+. "${ROOT}/scripts/guard.sh" 2>/dev/null || exit 0
+files_json="$(jq -nc '$ARGS.positional' --args -- "$@" 2>/dev/null)" || files_json='[]'
+batch_ev="$(jq -nc --arg cwd "$COORDKIT_PROJECT_DIR" --arg sid "$COORDKIT_SESSION_ID" --argjson files "$files_json" \
+  '{session_id:$sid,cwd:$cwd,tool_name:"Edit",tool_input:{file_paths:$files},coordkit_adapter:"codex"}' \
+  2>/dev/null)" || exit 0
+if [ "$phase" = "pre" ]; then
+  if [ "$(ck_enforcement_mode)" = "guard" ]; then
+    for file in "$@"; do
+      [ -n "$file" ] || continue
+      ev="$(jq -nc --arg cwd "$COORDKIT_PROJECT_DIR" --arg sid "$COORDKIT_SESSION_ID" --arg file "$file" \
+        '{session_id:$sid,cwd:$cwd,tool_name:"Edit",tool_input:{file_path:$file},coordkit_adapter:"codex"}' \
+        2>/dev/null)" || continue
+      guard_check "$ev" || exit 0
+    done
+  fi
+  bus_run check-batch <<<"$batch_ev"
+else
+  guard_record_files "$batch_ev" "$@" >/dev/null
+  bus_run record-batch <<<"$batch_ev" >/dev/null
+fi
 EOF
 }
 
@@ -146,17 +172,8 @@ case "$phase" in
     fi
     ;;
   pretool-write)
-    results=""
-    while IFS= read -r file; do
-      [ -n "$file" ] || continue
-      ev="$(file_event Edit "$file")"
-      [ -n "$ev" ] || continue
-      out="$(run_coord pretool-write "$ev")"
-      [ -n "$out" ] && results+="${out}"$'\n'
-      if printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1; then
-        break
-      fi
-    done < <(patch_paths)
+    mapfile -t write_paths < <(patch_paths)
+    results="$(run_write_batch pre "${write_paths[@]}")"
     emit_pretool_results "$results"
     ;;
   posttool-write)
@@ -167,11 +184,8 @@ case "$phase" in
     ' >/dev/null 2>&1; then
       exit 0
     fi
-    while IFS= read -r file; do
-      [ -n "$file" ] || continue
-      ev="$(file_event Edit "$file")"
-      [ -n "$ev" ] && run_coord posttool-write "$ev" >/dev/null
-    done < <(patch_paths)
+    mapfile -t write_paths < <(patch_paths)
+    run_write_batch post "${write_paths[@]}" >/dev/null
     ;;
   subagent-start)
     ev="$(printf '%s' "$input" | jq -c '

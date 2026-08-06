@@ -50,7 +50,7 @@ _CK_SIGNING_SH=1
 # alongside site.json/trust.json/clock.state there). A missing common.sh means
 # a broken install; define nothing rather than fail into a half-working state.
 # shellcheck source=./common.sh
-. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${GEMINI_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}}/scripts/common.sh" || return 0 2>/dev/null
+. "${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}}}/scripts/common.sh" || return 0 2>/dev/null
 
 ck_sign_available() { command -v openssl >/dev/null 2>&1; }
 

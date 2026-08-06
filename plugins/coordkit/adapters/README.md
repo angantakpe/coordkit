@@ -14,7 +14,6 @@ Adapter status in this repository:
   manifest and hook wiring.
 - `codex/` - shipped adapter, backed by `.codex-plugin/plugin.json`, Codex
   lifecycle hooks, and the bundled `$coordkit` skill.
-- `gemini/` - scaffolded adapter slot for a Gemini host integration.
 
 These adapter directories are intentionally small. They exist to keep host-
 specific packaging separate from the shared runtime, and to make future host

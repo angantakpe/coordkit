@@ -1,0 +1,41 @@
+{
+  "name": "coordkit-protocol",
+  "version": "0.1.0",
+  "purpose": "Explicit protocol contract for CoordKit coordination objects, messages, and invariants.",
+  "entities": [
+    "agent",
+    "session",
+    "actor",
+    "claim",
+    "task",
+    "message",
+    "event",
+    "transport"
+  ],
+  "invariants": [
+    "history is append-only",
+    "event identity is stable and deduplicated by eid",
+    "ordering is deterministic across readers",
+    "replay is idempotent",
+    "schema migration is explicit and non-destructive",
+    "malformed or partial input must not wedge the runtime",
+    "transport changes replication, not protocol meaning"
+  ],
+  "current_implementation": {
+    "agent_schema": "packages/protocol/agent.schema.json",
+    "claim_schema": "packages/protocol/claim.schema.json",
+    "event_schema": "packages/protocol/event.schema.json",
+    "message_schema": "packages/protocol/message.schema.json",
+    "session_schema": "packages/protocol/session.schema.json",
+    "task_schema": "packages/protocol/task.schema.json",
+    "transport_schema": "packages/protocol/transport.schema.json",
+    "runtime": "packages/core/scripts",
+    "transports": "plugins/coordkit/transports",
+    "plugin_wrappers": "plugins/coordkit/scripts"
+  },
+  "next_split": [
+    "split shared protocol types out of plugin packaging",
+    "move runtime-owned protocol behavior into packages/",
+    "keep plugin-side scripts as wrappers only"
+  ]
+}

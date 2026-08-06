@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN="${ROOT}/plugins/coordkit"
 tmp="$(mktemp -d /tmp/coordkit-ledger-budget.XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT
+trap 'status=$?; printf "token-budget-ledger: failed at line %s (exit %s)\n" "$LINENO" "$status" >&2; exit "$status"' ERR
 
 jq -e '
   .name == "coordkit-protocol"
@@ -215,7 +216,7 @@ printf '%s' "$shared_board" | grep -Eq '\[x\][[:space:]]+shared-task[[:space:]]+
 # watermark. Its monotonic actor counter must still make the note visible.
 mkdir -p "$shared/.coordkit-bus/log/actor-c"
 jq -nc '{schema_version:"2.0",eid:"sha256:wm-late-before",actor:"actor-c",clock:{p:50,c:1},seq:1,ts:3,
-  sid:"peer-c",sid8:"peer-c",host:"gemini",branch:"main",type:"note",subject:"late-note",
+  sid:"peer-c",sid8:"peer-c",host:"cli",branch:"main",type:"note",subject:"late-note",
   body:"late-before-global-watermark",refs:[],tags:[],lease:null}' > "$shared/.coordkit-bus/log/actor-c/seg.ndjson"
 late_prompt="$(shared_ledger prompt wm-reader UserPromptSubmit)"
 printf '%s' "$late_prompt" | jq -e '.hookSpecificOutput.additionalContext | contains("late-before-global-watermark")' >/dev/null

@@ -32,7 +32,7 @@ host adapter
   -> storage / replay
 ```
 
-- Host adapters translate Claude Code, Codex, Gemini, or CLI lifecycle events
+- Host adapters translate Claude Code, Codex, or CLI lifecycle events
   into protocol objects.
 - The runtime interprets protocol objects and decides what to emit, claim, warn
   about, or inject.
@@ -167,7 +167,7 @@ These are the protocol rules that must hold across adapters and transports.
    - They must not change the projection result for the same event set.
 
 6. Host-specific behavior stays at the edge.
-   - Claude, Codex, Gemini, and CLI integrations are adapters.
+   - Claude, Codex, and CLI integrations are adapters.
    - The protocol stays host-neutral.
 
 7. Fail open on coordination safety.
@@ -241,8 +241,8 @@ These are the protocol gaps still visible in the repo today.
 - The shared runtime now knows how to resolve protocol schema paths through
   `ck_protocol_root()` and `ck_protocol_schema_path()`, but it still treats the
   schemas as descriptive artifacts rather than typed runtime inputs.
-- The runtime is still split across package scripts and plugin wrappers rather
-  than a fully package-native runtime surface.
+- The canonical runtime lives in packages, but host installers still require a
+  synchronized self-contained copy under the plugin distribution directory.
 
 ## Intended next split
 
@@ -258,4 +258,5 @@ The next package boundary should turn this document into code:
 - `packages/bus/` for live-session coordination and collision visibility;
 - `packages/ledger/` for append-only history and projections;
 - `packages/transport-*` for storage and replication backends;
-- `plugins/coordkit/` as a thin wrapper layer.
+- `plugins/coordkit/` as the host packaging layer, including generated runtime
+  and protocol distribution copies where installers require self-containment.

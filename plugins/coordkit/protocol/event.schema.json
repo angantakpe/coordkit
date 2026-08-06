@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coordkit/schema/event/2.0",
+  "title": "coordkit event envelope v2",
+  "description": "One append-only JSON event per line in the coordination log. v1 events (no schema_version) are read tolerantly as 1.0: readers pass them through VERBATIM and treat any absent v2 field as its default — no on-read rewrite happens. (schema/migrations/0001_v1_to_v2.sh is an OPTIONAL offline/manual up-converter and is NOT invoked on the read path.) Stored lines are NEVER rewritten.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "eid", "id", "actor", "clock", "type", "subject"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Envelope version, major.minor. Readers MUST ignore unknown fields and treat a missing value as \"1.0\"."
+    },
+    "eid": {
+      "type": "string",
+      "description": "Content-addressed id over canonical(event minus eid,sig). The cross-replica DEDUP key and audit anchor. e.g. \"sha256:9f3c…\" (blake3 if b3sum is present)."
+    },
+    "id": {
+      "type": "string",
+      "description": "Sortable unique id (ULID-like). Tiebreak + display only; not the dedup key."
+    },
+    "actor": {
+      "type": "string",
+      "description": "STABLE per (machine + user + clone) site id. Partitions the committed filespace so two writers never touch the same segment file."
+    },
+    "clock": {
+      "type": "object",
+      "description": "Per-actor clock: wall-ms + counter. AS IMPLEMENTED the cross-instance total order is sort by (clock.p, clock.c, actor), and it IS the transport and shared-ledger read path: transports/lib.sh __total_order backs union reads, ledger projections use ordered stream position, and shared-session incremental reads persist max clock.c per actor so late-before-global-watermark arrivals remain visible. No cross-replica decision is based on replica-local `seq`. LIMITATION: because `clock.p` is unsynchronised per-machine wall-clock ms and `clock.c` is not reconciled against peers, ordering ACROSS actors is effectively wall-clock last-writer-wins and is subject to inter-machine clock skew (`clock.c`/`actor` only break exact-millisecond ties). Within one actor the counter and resulting cursor are monotonic.",
+      "required": ["p", "c"],
+      "properties": {
+        "p": { "type": "integer", "description": "wall-clock milliseconds" },
+        "c": { "type": "integer", "description": "AS IMPLEMENTED: a plain local monotonic counter, incremented once per emitted event and persisted per-actor in ${CLAUDE_PLUGIN_DATA}/clock.state. It is NOT reconciled against other actors — nothing observes peers' clocks or advances past a max observed value. True cross-replica clock advancement (Lamport-style) is RESERVED for future work and NOT YET IMPLEMENTED." }
+      }
+    },
+    "seq": {
+      "type": "integer",
+      "description": "LOCAL-only convenience counter (per physical log). NOT authoritative for cross-machine order — use clock."
+    },
+    "sid":    { "type": "string", "description": "Originating host session id." },
+    "sid8":   { "type": "string", "description": "First 8 chars of sid (display)." },
+    "host":   { "type": "string", "enum": ["claude-code", "codex", "cli"], "description": "Producer host adapter identity. Derived from adapter/runtime signals and independent of any user-facing app name." },
+    "user":   { "type": "string", "description": "Advisory producer metadata stamped locally from $USER. Relay bearer grants authenticate access to a room, but the server deliberately preserves the content-addressed event unchanged and therefore does not rewrite this field. Do not use event.user for authorization." },
+    "branch": { "type": "string", "description": "Git branch at write time (or \"no-git\")." },
+    "type": {
+      "type": "string",
+      "description": "Event type. KNOWN types: note, decision, question, answer, task, claim, done, block. This list is DOCUMENTATION, not a closed set — readers MUST tolerate unknown types as opaque notes, so validation accepts any string. Producers SHOULD stick to the known types.",
+      "anyOf": [
+        { "enum": ["note", "decision", "question", "answer", "task", "claim", "done", "block"] },
+        { "type": "string" }
+      ]
+    },
+    "subject": { "type": "string", "description": "Reconciliation key: the latest non-superseded event per subject wins." },
+    "body":    { "type": "string", "description": "Free-text payload. A task body may carry 'dep:<subject>' tokens for ordering." },
+    "refs":    { "type": "array", "items": { "type": "string" }, "description": "Content refs (eids) instead of fragile numeric seq refs." },
+    "tags":    { "type": "array", "items": { "type": "string" } },
+    "lease": {
+      "description": "ALWAYS an object from v2 onward (never a bare scalar). null when not a claim.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["until"],
+          "properties": {
+            "until": { "type": "integer", "description": "epoch seconds the lease is valid until" },
+            "owner": { "type": "string", "description": "actor holding the lease" },
+            "sid8":  { "type": "string" }
+          }
+        }
+      ]
+    },
+    "supersedes": {
+      "type": ["string", "null"],
+      "description": "RESERVED — eid of the prior version of this subject, an explicit version chain for audit/history. NOT YET IMPLEMENTED: the emitter always writes null and no reader consults it; subject reconciliation is done positionally (latest event per subject wins), not by walking this chain."
+    },
+    "sig": {
+      "type": ["string", "null"],
+      "description": "RESERVED — detached ed25519 signature over canonical(event minus sig). NOT YET IMPLEMENTED: nothing signs and nothing verifies; the emitter always writes null. The field is carved out now so signed events stay eid-compatible later (eid is computed over the event minus eid and sig, so adding a signature never changes an event's id)."
+    }
+  }
+}

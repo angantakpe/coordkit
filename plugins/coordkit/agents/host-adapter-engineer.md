@@ -3,7 +3,7 @@ name: host-adapter-engineer
 description: Design, repair, or verify a CoordKit host adapter from plugin packaging and lifecycle payload translation through shared-core dispatch and subagent observability.
 role_type: system
 lifecycle_stage: execution
-routing_keywords: ["host adapter", "codex", "claude code", "gemini", "plugin manifest", "hook payload", "lifecycle event", "session start", "tool translation", "subagent start", "packaging"]
+routing_keywords: ["host adapter", "codex", "claude code", "plugin manifest", "hook payload", "lifecycle event", "session start", "tool translation", "subagent start", "packaging"]
 tools: Read, Write, Edit, Bash, Grep, Glob
 color: green
 ---

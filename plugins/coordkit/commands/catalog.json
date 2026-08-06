@@ -6,7 +6,6 @@
       "surfaces": {
         "claude-code": "/bus",
         "codex": "$coordkit bus",
-        "gemini": "coordkit bus",
         "cli": "cobus dashboard"
       }
     },
@@ -15,7 +14,6 @@
       "surfaces": {
         "claude-code": "/ctx",
         "codex": "$coordkit",
-        "gemini": "coordkit digest",
         "cli": "cobus digest"
       }
     },
@@ -24,7 +22,6 @@
       "surfaces": {
         "claude-code": "/led",
         "codex": "$coordkit ledger",
-        "gemini": "coordkit ledger",
         "cli": "cobus"
       }
     },
@@ -33,7 +30,6 @@
       "surfaces": {
         "claude-code": "/claim",
         "codex": "$coordkit claim",
-        "gemini": "coordkit claim",
         "cli": "cobus claim"
       }
     },
@@ -42,7 +38,6 @@
       "surfaces": {
         "claude-code": "/fleet",
         "codex": "$coordkit fleet",
-        "gemini": "coordkit fleet",
         "cli": "cobus fleet"
       }
     },
@@ -51,7 +46,6 @@
       "surfaces": {
         "claude-code": "/msg",
         "codex": "$coordkit msg",
-        "gemini": "coordkit msg",
         "cli": "cobus msg"
       }
     },
@@ -60,7 +54,6 @@
       "surfaces": {
         "claude-code": "/guard",
         "codex": "$coordkit guard",
-        "gemini": "coordkit guard",
         "cli": "cobus guard"
       }
     },
@@ -69,7 +62,6 @@
       "surfaces": {
         "claude-code": "/statusline-setup",
         "codex": "$coordkit statusline-setup",
-        "gemini": "coordkit statusline-setup",
         "cli": "cobus statusline-setup"
       }
     },
@@ -78,7 +70,6 @@
       "surfaces": {
         "claude-code": "/dev-docs",
         "codex": "$coordkit dev-docs",
-        "gemini": "coordkit dev-docs",
         "cli": "cobus dev-docs"
       }
     },
@@ -87,7 +78,6 @@
       "surfaces": {
         "claude-code": "/dev-docs-update",
         "codex": "$coordkit dev-docs-update",
-        "gemini": "coordkit dev-docs-update",
         "cli": "cobus dev-docs-update"
       }
     },
@@ -96,7 +86,6 @@
       "surfaces": {
         "claude-code": "/route-research-for-testing",
         "codex": "$coordkit route-research-for-testing",
-        "gemini": "coordkit route-research-for-testing",
         "cli": "cobus route-research-for-testing"
       }
     }
