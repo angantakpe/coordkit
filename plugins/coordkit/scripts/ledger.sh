@@ -235,7 +235,7 @@ if [ "$_ck_want" = 1 ] && [ -f "$_ck_lib" ]; then
   . "$_ck_lib" 2>/dev/null && command -v logstore_readall >/dev/null 2>&1 && CK_LOGSTORE=1
 fi
 # v2 envelope is the shipped DEFAULT (carries seq + eid-dedup + clock order, and
-# is schema-valid — see packages/protocol/event.schema.json). Every read path in this file
+# is schema-valid — see plugins/coordkit/protocol/event.schema.json). Every read path in this file
 # (digest, board, task_status, delta injection, prompt) keys off fields that v2
 # and v1 both expose (seq/type/subject/body/branch/sid/sid8), and task_status
 # already handles lease as object-or-scalar — so v2 is read-compatible with mixed

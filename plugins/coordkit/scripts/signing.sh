@@ -6,7 +6,7 @@
 # ledger.sh's append_event/_ck_emit_v2 (the write path every event goes
 # through) and build_digest/the delta-injection read paths (the SessionStart/
 # UserPromptSubmit hot path) never call into it. `sig` stays null on every
-# real event exactly as packages/protocol/event.schema.json's field note says: "NOT YET
+# real event exactly as plugins/coordkit/protocol/event.schema.json's field note says: "NOT YET
 # IMPLEMENTED: nothing signs and nothing verifies; the emitter always writes
 # null." This file makes that mechanism real and testable in isolation without
 # flipping it live — see plugins/coordkit/docs/SIGNING-PROPOSAL.md for why

@@ -30,20 +30,18 @@ test -x "$PLUGIN/scripts/repo-memory-gate.sh"
 test -x "$PLUGIN/scripts/agent-runtime.py"
 test -x "$PLUGIN/bin/coordkit-monitor"
 test -x "$PLUGIN/bin/coordkit-subagent-statusline"
-for runtime in "$ROOT/packages/core/scripts"/*; do
+for runtime in "$ROOT/plugins/coordkit/scripts/core/scripts"/*; do
   name="${runtime##*/}"
   cmp -s "$runtime" "$PLUGIN/scripts/$name" || {
-    printf 'plugin runtime drift: packages/core/scripts/%s != plugins/coordkit/scripts/%s\n' "$name" "$name" >&2
+    printf 'plugin runtime drift: plugins/coordkit/scripts/core/scripts/%s != plugins/coordkit/scripts/%s\n' "$name" "$name" >&2
     exit 1
   }
 done
-for protocol in "$ROOT/packages/protocol"/*; do
-  name="${protocol##*/}"
+for protocol in "$PLUGIN/protocol"/*; do
   [ -f "$protocol" ] || continue
-  cmp -s "$protocol" "$PLUGIN/protocol/$name" || {
-    printf 'plugin protocol drift: packages/protocol/%s != plugins/coordkit/protocol/%s\n' "$name" "$name" >&2
-    exit 1
-  }
+  case "$protocol" in
+    *.json) jq -e . "$protocol" >/dev/null ;;
+  esac
 done
 COORDKIT_PLUGIN_ROOT="$PLUGIN" "$PLUGIN/bin/cobus" swarm --help >/dev/null
 test -f "$PLUGIN/skills/agent-orchestrator/SKILL.md"

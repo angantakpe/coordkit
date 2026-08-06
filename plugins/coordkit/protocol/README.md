@@ -53,7 +53,7 @@ A session is one live host conversation on one machine.
 
 An agent is the active coordination participant inside a session.
 
-- `packages/protocol/agent.schema.json` is the canonical agent definition.
+- `plugins/coordkit/protocol/agent.schema.json` is the canonical agent definition.
 - The host may surface it as a Claude thread, Codex subagent, or another
   runtime-specific persona.
 - The protocol only cares that the actor is stable enough to attribute events,
@@ -72,7 +72,7 @@ An actor is the stable identity used to partition coordination state.
 
 An event is the append-only record line in the coordination log.
 
-- `packages/protocol/event.schema.json` is the canonical envelope for events.
+- `plugins/coordkit/protocol/event.schema.json` is the canonical envelope for events.
 - Events are append-only.
 - Stored events are never rewritten in place.
 - The event id (`eid`) is the deduplication and audit anchor.
@@ -111,7 +111,7 @@ A task is claimable work in the shared board.
 A message is a direct delivery object for one live session or a set of live
 sessions.
 
-- `packages/protocol/message.schema.json` is the canonical message envelope.
+- `plugins/coordkit/protocol/message.schema.json` is the canonical message envelope.
 - Current implementation: messages are delivered through the bus inbox and
   injected into the next turn's context.
 - Messages are not the same thing as ledger events.
@@ -231,12 +231,12 @@ These are the protocol gaps still visible in the repo today.
   package boundary, not a fully typed runtime.
 - `coord.toml` still combines transport configuration and enforcement policy in
   one file.
-- `message` is now a first-class protocol object in `packages/protocol/`, but
+- `message` is now a first-class protocol object in `plugins/coordkit/protocol/`, but
   inbox files are still the delivery medium and the runtime still projects
   them through shell code.
-- `agent` is now first-class in `packages/protocol/`, but the runtime still
+- `agent` is now first-class in `plugins/coordkit/protocol/`, but the runtime still
   discovers agents from Markdown frontmatter rather than typed schema objects.
-- The protocol schemas now live in `packages/protocol/`, but the runtime still
+- The protocol schemas now live in `plugins/coordkit/protocol/`, but the runtime still
   projects and consumes them through shell code rather than a typed runtime.
 - The shared runtime now knows how to resolve protocol schema paths through
   `ck_protocol_root()` and `ck_protocol_schema_path()`, but it still treats the
@@ -248,13 +248,13 @@ These are the protocol gaps still visible in the repo today.
 
 The next package boundary should turn this document into code:
 
-- `packages/protocol/` for shared types and schemas;
-- `packages/protocol/agent.schema.json`, `session.schema.json`, `claim.schema.json`,
+- `plugins/coordkit/protocol/` for shared types and schemas;
+- `plugins/coordkit/protocol/agent.schema.json`, `session.schema.json`, `claim.schema.json`,
   `task.schema.json`, `message.schema.json`, `event.schema.json`, and
   `transport.schema.json`
   for the protocol envelopes and projections that move across the bus and
   ledger;
-- `packages/core/` for session, claim, task, and message logic;
+- `plugins/coordkit/scripts/core/` for session, claim, task, and message logic;
 - `packages/bus/` for live-session coordination and collision visibility;
 - `packages/ledger/` for append-only history and projections;
 - `packages/transport-*` for storage and replication backends;

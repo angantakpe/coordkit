@@ -23,7 +23,7 @@ helps them answer:
 - How can agents coordinate across different computers?
 - What context should be injected into a new agent session?
 
-The canonical coordination runtime lives in `packages/core/scripts`.
+The canonical coordination runtime lives in `plugins/coordkit/scripts/core/scripts`.
 `plugins/coordkit/scripts` contains synchronized distribution copies so the
 installed plugin remains self-contained inside a versioned host cache; package
 tests reject drift between those two trees.

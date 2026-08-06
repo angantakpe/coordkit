@@ -1,7 +1,7 @@
 # Shared command spec
 
 The canonical shared source of truth lives in
-[`packages/core/commands/catalog.json`](/home/anga/workspace/projects/agents/coordkit/packages/core/commands/catalog.json).
+[`plugins/coordkit/scripts/core/commands/catalog.json`](/home/anga/workspace/projects/agents/coordkit/plugins/coordkit/scripts/core/commands/catalog.json).
 The Markdown files in this directory are host wrappers around those command
 intents. Host adapters may expose the same intent differently, but the behavior
 should stay aligned with the core package.

@@ -16,10 +16,10 @@
 # mkdir, no config reads. Everything is deferred to call time.
 #
 # Sourced as:
-#   packages/core/scripts/*             . "${COORDKIT_CORE_ROOT:-${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}}}/scripts/common.sh"
-#   plugin wrappers                     re-source this file after setting COORDKIT_CORE_ROOT
-#   transports/                          via __logstore_common (COORDKIT_PLUGIN_ROOT, else legacy fallback)
-#   bin/*                                relative to the readlink-resolved ROOT
+#   plugins/coordkit/scripts/core/scripts/* . "${COORDKIT_CORE_ROOT:-${COORDKIT_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}}}/scripts/common.sh"
+#   plugin wrappers                        re-source this file after setting COORDKIT_CORE_ROOT
+#   transports/                            via __logstore_common (COORDKIT_PLUGIN_ROOT, else legacy fallback)
+#   bin/*                                  relative to the readlink-resolved ROOT
 
 [ -n "${_CK_COMMON_SH:-}" ] && return 0
 _CK_COMMON_SH=1
@@ -49,11 +49,15 @@ ck_runtime_root() {
 ck_protocol_root() {
   local core_root
   core_root="$(ck_core_root)"
-  if [ -d "${core_root}/../protocol" ]; then
+  if [ -f "${core_root}/../protocol/protocol.json" ] || [ -f "${core_root}/../protocol/agent.schema.json" ]; then
     ( cd "${core_root}/../protocol" 2>/dev/null && pwd )
     return 0
   fi
-  if [ -d "${core_root}/protocol" ]; then
+  if [ -f "${core_root}/../../protocol/protocol.json" ] || [ -f "${core_root}/../../protocol/agent.schema.json" ]; then
+    ( cd "${core_root}/../../protocol" 2>/dev/null && pwd )
+    return 0
+  fi
+  if [ -f "${core_root}/protocol/protocol.json" ] || [ -f "${core_root}/protocol/agent.schema.json" ]; then
     ( cd "${core_root}/protocol" 2>/dev/null && pwd )
     return 0
   fi
@@ -76,7 +80,16 @@ ck_protocol_schema_path() {
 
 ck_plugin_root() {
   if ck_first_env COORDKIT_PLUGIN_ROOT CLAUDE_PLUGIN_ROOT CODEX_PLUGIN_ROOT; then return 0; fi
-  ( cd "$(dirname "${BASH_SOURCE[0]}")/../../../plugins/coordkit" 2>/dev/null && pwd )
+  local dir
+  dir="$(ck_core_root)"
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    if [ -d "$dir/.codex-plugin" ] || [ -d "$dir/.claude-plugin" ]; then
+      ( cd "$dir" 2>/dev/null && pwd )
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  ( cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd )
 }
 
 # Persistent, cross-repo plugin data dir (site.json, clock.state, trust.json).

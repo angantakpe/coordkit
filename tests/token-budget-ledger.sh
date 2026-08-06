@@ -14,44 +14,44 @@ jq -e '
   and (.entities | index("event"))
   and (.entities | index("message"))
   and (.invariants | index("history is append-only"))
-' "$ROOT/packages/protocol/protocol.json" >/dev/null
-COORDKIT_CORE_ROOT="$ROOT/packages/core" bash -c '
+' "$ROOT/plugins/coordkit/protocol/protocol.json" >/dev/null
+COORDKIT_CORE_ROOT="$ROOT/plugins/coordkit/scripts/core" bash -c '
   set -euo pipefail
   . "$COORDKIT_CORE_ROOT/scripts/common.sh"
-  test "$(ck_protocol_root)" = "'"$ROOT/packages/protocol"'"
-  test "$(ck_protocol_schema_path agent)" = "'"$ROOT/packages/protocol/agent.schema.json"'"
-  test "$(ck_protocol_schema_path event)" = "'"$ROOT/packages/protocol/event.schema.json"'"
-  test "$(ck_protocol_schema_path message)" = "'"$ROOT/packages/protocol/message.schema.json"'"
+  test "$(ck_protocol_root)" = "'"$ROOT/plugins/coordkit/protocol"'"
+  test "$(ck_protocol_schema_path agent)" = "'"$ROOT/plugins/coordkit/protocol/agent.schema.json"'"
+  test "$(ck_protocol_schema_path event)" = "'"$ROOT/plugins/coordkit/protocol/event.schema.json"'"
+  test "$(ck_protocol_schema_path message)" = "'"$ROOT/plugins/coordkit/protocol/message.schema.json"'"
 '
-test "$(jq -r '."$id"' "$ROOT/packages/protocol/agent.schema.json")" = 'https://coordkit/schema/agent/1.0'
+test "$(jq -r '."$id"' "$ROOT/plugins/coordkit/protocol/agent.schema.json")" = 'https://coordkit/schema/agent/1.0'
 jq -e '.title == "coordkit agent definition" and (.required | index("name")) and (.required | index("role_type"))' \
-  "$ROOT/packages/protocol/agent.schema.json" >/dev/null
-test "$(jq -r '."$id"' "$ROOT/packages/protocol/event.schema.json")" = 'https://coordkit/schema/event/2.0'
+  "$ROOT/plugins/coordkit/protocol/agent.schema.json" >/dev/null
+test "$(jq -r '."$id"' "$ROOT/plugins/coordkit/protocol/event.schema.json")" = 'https://coordkit/schema/event/2.0'
 jq -e '.title == "coordkit session state" and (.required | index("sid")) and (.required | index("last_seen"))' \
-  "$ROOT/packages/protocol/session.schema.json" >/dev/null
+  "$ROOT/plugins/coordkit/protocol/session.schema.json" >/dev/null
 jq -e '.title == "coordkit claim envelope" and (.required | index("kind")) and (.required | index("owner"))' \
-  "$ROOT/packages/protocol/claim.schema.json" >/dev/null
+  "$ROOT/plugins/coordkit/protocol/claim.schema.json" >/dev/null
 jq -e '.title == "coordkit task projection" and (.required | index("subject")) and (.required | index("status"))' \
-  "$ROOT/packages/protocol/task.schema.json" >/dev/null
+  "$ROOT/plugins/coordkit/protocol/task.schema.json" >/dev/null
 jq -e '
   .["$id"] == "https://coordkit/schema/message/1.0"
   and .title == "coordkit message envelope"
   and (.required | index("sender"))
   and (.required | index("target"))
-' "$ROOT/packages/protocol/message.schema.json" >/dev/null
+' "$ROOT/plugins/coordkit/protocol/message.schema.json" >/dev/null
 jq -e '.title == "coordkit transport family" and (.required | index("mode")) and (.required | index("storage"))' \
-  "$ROOT/packages/protocol/transport.schema.json" >/dev/null
-grep -Fq '`agent` is now first-class in `packages/protocol/`' "$ROOT/packages/protocol/README.md"
-grep -Fq '`message` is now a first-class protocol object' "$ROOT/packages/protocol/README.md"
-grep -Fq 'packages/protocol/message.schema.json' "$ROOT/packages/protocol/README.md"
+  "$ROOT/plugins/coordkit/protocol/transport.schema.json" >/dev/null
+grep -Fq '`agent` is now first-class in `plugins/coordkit/protocol/`' "$ROOT/plugins/coordkit/protocol/README.md"
+grep -Fq '`message` is now a first-class protocol object' "$ROOT/plugins/coordkit/protocol/README.md"
+grep -Fq 'plugins/coordkit/protocol/message.schema.json' "$ROOT/plugins/coordkit/protocol/README.md"
 jq -e '
-  .current_implementation.agent_schema == "packages/protocol/agent.schema.json"
-  and .current_implementation.message_schema == "packages/protocol/message.schema.json"
-  and .current_implementation.session_schema == "packages/protocol/session.schema.json"
-  and .current_implementation.claim_schema == "packages/protocol/claim.schema.json"
-  and .current_implementation.task_schema == "packages/protocol/task.schema.json"
-  and .current_implementation.transport_schema == "packages/protocol/transport.schema.json"
-' "$ROOT/packages/protocol/protocol.json" >/dev/null
+  .current_implementation.agent_schema == "plugins/coordkit/protocol/agent.schema.json"
+  and .current_implementation.message_schema == "plugins/coordkit/protocol/message.schema.json"
+  and .current_implementation.session_schema == "plugins/coordkit/protocol/session.schema.json"
+  and .current_implementation.claim_schema == "plugins/coordkit/protocol/claim.schema.json"
+  and .current_implementation.task_schema == "plugins/coordkit/protocol/task.schema.json"
+  and .current_implementation.transport_schema == "plugins/coordkit/protocol/transport.schema.json"
+' "$ROOT/plugins/coordkit/protocol/protocol.json" >/dev/null
 
 git -C "$tmp" init -q
 mkdir -p "$tmp/.coordkit-bus" "$tmp/.claude/coord"

@@ -415,10 +415,12 @@ def build_parser(default_agents_dir: Path) -> argparse.ArgumentParser:
 
 
 def run(argv: list[str]) -> int:
-    plugin_root = Path(
-        os.environ.get("COORDKIT_PLUGIN_ROOT")
-        or (Path(__file__).resolve().parents[3] / "plugins" / "coordkit")
-    )
+    resolved = Path(__file__).resolve()
+    if os.environ.get("COORDKIT_PLUGIN_ROOT"):
+        plugin_root = Path(os.environ["COORDKIT_PLUGIN_ROOT"])
+    else:
+        core_root = resolved.parents[3]
+        plugin_root = core_root if (core_root / "agents").is_dir() else core_root / "plugins" / "coordkit"
     args = build_parser(plugin_root / "agents").parse_args(argv)
     catalog = load_catalog(args.agents_dir)
 

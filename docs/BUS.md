@@ -1,13 +1,13 @@
 # How the bus works
 
-`packages/core/scripts/bus.sh` is coordkit's awareness layer — the
+`plugins/coordkit/scripts/core/scripts/bus.sh` is coordkit's awareness layer — the
 "who else is here, what are they touching" half of the system. It's simpler
 than the ledger (`docs/LEDGER.md`): no event sourcing, just per-session
 heartbeat files and a soft-lock convention, refreshed on every hook.
 
 The bus is not invoked directly by hooks. Every lifecycle event goes to the
 single dispatcher `swarm.sh`. Its canonical source lives under
-`packages/core/scripts/`, with a synchronized self-contained distribution copy
+`plugins/coordkit/scripts/core/scripts/`, with a synchronized self-contained distribution copy
 under `plugins/coordkit/scripts/`. The dispatcher sources `bus.sh`, `ledger.sh`, and `guard.sh` as libraries and runs
 their phases in-process — so one hook event costs one shell, not one per
 subsystem. This doc covers only the bus's phases; see [§8](#8-the-bus-and-guard-mode)
@@ -113,7 +113,7 @@ the warning when a colliding edit is attempted again.
 `msg <all|sid8|branch:name> "<text>"` drops a timestamped line into the
 target session(s)' `inbox/<sid>/*.msg`, delivered as injected context at their
 next `SessionStart` or `UserPromptSubmit`, then deleted. The logical message
-envelope is defined in `packages/protocol/message.schema.json`; the inbox file
+envelope is defined in `plugins/coordkit/protocol/message.schema.json`; the inbox file
 is the delivery medium, not the protocol itself. Delivery is capped per hook
 (`max_messages = 2` by default); excess message files stay queued rather than
 being silently consumed. Messages sent from a plain shell (not from inside
@@ -168,7 +168,7 @@ default, see its own `--help`), and `cobus fleet` (same as `/fleet`).
 
 Through coordkit 2.x, the hard anti-clobber blocker was a **separate plugin**
 (`coordguard`) that you installed alongside coordkit. As of **3.0.0** the
-canonical implementation lives in `packages/core/scripts/guard.sh`, with a
+canonical implementation lives in `plugins/coordkit/scripts/core/scripts/guard.sh`, with a
 synchronized distribution copy in `plugins/coordkit/scripts/guard.sh`. The
 same runtime is reached by the shared `swarm.sh` dispatcher. Full details —
 the `warn` vs `guard` modes, how the mode is resolved from env / `coord.toml`

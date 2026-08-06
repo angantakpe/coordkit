@@ -19,7 +19,7 @@ entries are no longer on disk but remain in git history
 ## 5.2.1
 
 ### Changed
-- Promoted the coordination engine into an explicit `packages/core`
+- Promoted the coordination engine into an explicit `plugins/coordkit/scripts/core`
   package, with a shared command catalog and core domain manifest so the
   architecture is visible outside the plugin wrappers.
 - Moved repo-local `.coordkit-bus` exclusion into code paths that update

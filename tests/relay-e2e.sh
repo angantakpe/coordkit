@@ -24,7 +24,7 @@ trap cleanup EXIT
 
 start_server() {
   COORDKIT_RELAY_TOKENS='{"test-token":["test-room"]}' COORDKIT_RELAY_DATA="$server_data" \
-    COORDKIT_RELAY_PORT="$port" node "$ROOT/apps/relay/server.mjs" >"$tmp/server.log" 2>&1 &
+    COORDKIT_RELAY_PORT="$port" node "$ROOT/plugins/coordkit/apps/relay/server.mjs" >"$tmp/server.log" 2>&1 &
   server_pid=$!
   for _ in $(seq 1 50); do
     curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1 && return 0

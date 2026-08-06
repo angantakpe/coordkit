@@ -63,12 +63,12 @@ coordkit/
 ## Plain English
 
 - `apps/` holds runnable entrypoints.
-- `apps/relay/` is the network service for cross-machine event sharing.
+- `plugins/coordkit/apps/relay/` is the network service for cross-machine event sharing.
 - `apps/cli/` is the command-line entrypoint surface.
-- `packages/core/` is the current home for the shared runtime scripts
+- `plugins/coordkit/scripts/core/` is the current home for the shared runtime scripts
   and shared package metadata.
-- `packages/protocol/` defines events, commands, and schemas.
-- `packages/core/` holds the shared coordination domain: sessions, peers,
+- `plugins/coordkit/protocol/` defines events, commands, and schemas.
+- `plugins/coordkit/scripts/core/` holds the shared coordination domain: sessions, peers,
   claims, inboxes, tasks, and collisions.
 - `packages/ledger/`, `packages/bus/`, and `packages/guard/` implement the
   shared runtime behavior.
@@ -86,14 +86,14 @@ coordkit/
 
 ## Current shape
 
-The current repository places the relay service under `apps/relay/` and the
-canonical shared runtime under `packages/core/scripts/`.
+The current repository places the relay service under `plugins/coordkit/apps/relay/` and the
+canonical shared runtime under `plugins/coordkit/scripts/core/scripts/`.
 `plugins/coordkit/scripts/` contains checked-in distribution copies because
 host plugin installers copy only that plugin directory into their versioned
 caches. Package tests require those copies to match the canonical runtime. This
 is still not the full package split described above.
 
-`packages/protocol/` now exists as the explicit home for the protocol contract
+`plugins/coordkit/protocol/` now exists as the explicit home for the protocol contract
 itself. It is still paired with the current shell-based schema and runtime, but
 it marks the boundary the next refactor steps should converge on.
 
