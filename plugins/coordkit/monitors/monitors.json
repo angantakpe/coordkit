@@ -1,0 +1,7 @@
+[
+  {
+    "name": "coordkit-live-state",
+    "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/coordkit-monitor",
+    "description": "CoordKit live session and claim changes"
+  }
+]

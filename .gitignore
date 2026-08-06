@@ -4,3 +4,7 @@
 # claude-mem drops a per-directory CLAUDE.local.md context stub throughout the
 # tree. They are generated session artifacts, not part of the packaged plugins.
 **/CLAUDE.local.md
+
+# Python bytecode caches are created by the plugin tests and should not dirty
+# the working tree.
+plugins/coordkit/**/__pycache__/

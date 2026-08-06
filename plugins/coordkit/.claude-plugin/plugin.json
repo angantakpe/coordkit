@@ -3,10 +3,19 @@
   "name": "coordkit",
   "displayName": "coordkit",
   "version": "5.2.1",
-  "description": "Multi-host coordination for Claude Code and Codex: a per-repo bus, durable shared ledger, optional authenticated cross-machine relay, and opt-in anti-clobber guard. Warn-only by default. Heartbeats identify their host, so collision and subagent messages distinguish Claude Code, Codex, Gemini, and CLI instances.",
+  "description": "Multi-host coordination for Claude Code and Codex: a per-repo bus, durable shared ledger, optional authenticated cross-machine relay, and opt-in anti-clobber guard. Warn-only by default. Heartbeats identify their host, so collision and subagent messages distinguish Claude Code, Codex, and CLI instances.",
   "author": {
     "name": "codehornets",
     "email": "codehornets@gmail.com"
+  },
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "agents": "./agents/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "lspServers": "./.lsp.json",
+  "experimental": {
+    "monitors": "./monitors/monitors.json"
   },
   "keywords": [
     "coordination",

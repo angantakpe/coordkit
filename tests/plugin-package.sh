@@ -10,16 +10,26 @@ HOOKS="${PLUGIN}/hooks/hooks.json"
 # manifest also keeps the package compatible with the strict plugin validator.
 jq -e 'has("hooks") | not' "$MANIFEST" >/dev/null
 jq -e '.skills == "./skills/"' "$MANIFEST" >/dev/null
-test "$(jq -r '.version' "$MANIFEST")" = "5.2.1"
-test "$(jq -r '.version' "$PLUGIN/.claude-plugin/plugin.json")" = "5.2.1"
+PLUGIN_VERSION="$(jq -r '.version' "$MANIFEST")"
+test "$PLUGIN_VERSION" = "$(jq -r '.version' "$PLUGIN/.claude-plugin/plugin.json")"
 test -f "$HOOKS"
 jq -e '
   .hooks.PreToolUse[].hooks[].command
   | test("\\$\\{COORDKIT_PLUGIN_ROOT:-\\$\\{PLUGIN_ROOT:-\\$\\{CLAUDE_PLUGIN_ROOT\\}\\}\\}")
 ' "$HOOKS" >/dev/null
+for companion in \
+  "$PLUGIN/.mcp.json" \
+  "$PLUGIN/.lsp.json" \
+  "$PLUGIN/monitors/monitors.json"
+do
+  test -f "$companion"
+  jq -e . "$companion" >/dev/null
+done
 test -x "$PLUGIN/adapters/hook.sh"
 test -x "$PLUGIN/scripts/repo-memory-gate.sh"
 test -x "$PLUGIN/scripts/agent-runtime.py"
+test -x "$PLUGIN/bin/coordkit-monitor"
+test -x "$PLUGIN/bin/coordkit-subagent-statusline"
 for runtime in "$ROOT/packages/core/scripts"/*; do
   name="${runtime##*/}"
   cmp -s "$runtime" "$PLUGIN/scripts/$name" || {
@@ -57,6 +67,35 @@ jq -e '
   and ([.hooks.SessionEnd[]?.hooks[]?.timeout // empty] | all(. <= 3))
 ' "$HOOKS" >/dev/null
 
-python3 /home/anga/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py "$PLUGIN" >/dev/null
+VALIDATE_PLUGIN="${VALIDATE_PLUGIN:-}"
+if [ -z "$VALIDATE_PLUGIN" ] && command -v validate_plugin.py >/dev/null 2>&1; then
+  VALIDATE_PLUGIN="$(command -v validate_plugin.py)"
+fi
+
+if [ -z "$VALIDATE_PLUGIN" ]; then
+  for skill_root in \
+    "${CODEX_HOME:-$HOME/.codex}/skills" \
+    "${AGENTS_HOME:-$HOME/.agents}/skills"
+  do
+    [ -d "$skill_root" ] || continue
+    VALIDATE_PLUGIN="$(
+      find "$skill_root" \
+        -path '*/plugin-creator/scripts/validate_plugin.py' \
+        -type f \
+        | LC_ALL=C sort \
+        | head -n 1
+    )"
+    if [ -n "$VALIDATE_PLUGIN" ]; then
+      break
+    fi
+  done
+fi
+
+if [ -z "$VALIDATE_PLUGIN" ] || [ ! -f "$VALIDATE_PLUGIN" ]; then
+  printf 'validate_plugin.py not found; set VALIDATE_PLUGIN to a local plugin-creator validator\n' >&2
+  exit 1
+fi
+
+python3 "$VALIDATE_PLUGIN" "$PLUGIN" >/dev/null
 
 echo "plugin package: ok"

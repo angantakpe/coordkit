@@ -144,16 +144,36 @@ under the hood:
 - **[docs/architecture.md](docs/architecture.md)** — the high-level repo map:
   the recommended target layout, the current layering, and the migration
   direction.
+- **[docs/RELEASE.md](docs/RELEASE.md)** — the release checklist and tag
+  convention.
 - **[docs/STATUSLINE.md](docs/STATUSLINE.md)** — the Claude statusline badge:
   what it shows, why a manifest cannot wire it, and how to keep it wired.
 - **[docs/HOSTS.md](docs/HOSTS.md)** — the host/adapter split: what belongs to
   the shared coordination core, what stays adapter-specific, and how shared
   command specs get wrapped for each host.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)**, **[SECURITY.md](SECURITY.md)**,
+  **[SUPPORT.md](SUPPORT.md)**, and **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**
+  — the public-project hygiene docs that open-source users expect to find.
 - **[plugins/coordkit/commands/README.md](plugins/coordkit/commands/README.md)** —
   the shared command-spec source of truth for the command surface.
 - **[Enforcement modes](#enforcement-modes)** (below) — the guard layer: what
   `warn` vs `guard` mode actually do, how the mode is resolved, and the honest
   version of the safety story now that both live in one plugin.
+
+## Requirements
+
+The repo is intentionally lightweight, but the actual scripts still assume a
+small toolchain:
+
+- Bash 4 or newer
+- `jq`
+- `python3`
+- `make`
+- `node` 20 or newer for the relay service and `node --check`
+- `git`
+
+The shell scripts use Bash features such as `mapfile` and lowercase expansion,
+so the stock macOS `/bin/bash` 3.2 is not sufficient.
 
 ## Host model
 
@@ -395,15 +415,13 @@ bus and ledger. Claude also gets skill auto-activation; Codex gets the bundled
 `$coordkit` skill. `/guard on` in Claude, or `$coordkit` with guard `on` in
 Codex, adds hard anti-clobber enforcement for that repository.
 
-> **Distribution reality check.** As currently configured this repo's only
-> remote is **private** (`git@github.com:angantakpe/coordkit.git`),
-> so the hosted `/plugin marketplace add <owner>/coordkit` form
-> works **only for the repo owner and anyone explicitly granted access** — for
-> everyone else it fails at clone time. Genuinely shareable distribution needs
-> either making the repo public or documenting an access-request path; neither
-> has been done. Until then, the local-clone form
-> (`/plugin marketplace add ./coordkit`) is the path that works for
-> anyone who has the files.
+> **Distribution reality check.** The hosted
+> `/plugin marketplace add <owner>/coordkit` form works only for people who can
+> clone the repository. If the repo is private or access-controlled, that means
+> the owner and anyone explicitly granted access; if it is public, it works for
+> anyone with the URL. When access is the limiting factor, the local-clone form
+> (`/plugin marketplace add ./coordkit`) is the path that works for anyone who
+> has the files.
 
 To use skill auto-activation, seed your global rules file (the schema is
 documented inline in `plugins/coordkit/scripts/skill-activation.sh`'s header
@@ -455,6 +473,8 @@ you confusing double denies.
 
 Updates ship by bumping the plugin `version`; users pull them with
 `/plugin marketplace update` followed by `/plugin update`.
+
+CoordKit is MIT-licensed. See [LICENSE](LICENSE).
 
 ## What gets wired
 

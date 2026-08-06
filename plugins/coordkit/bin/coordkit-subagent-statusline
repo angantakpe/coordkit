@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+
+
+def pct(token_count, window_size):
+    if not isinstance(token_count, (int, float)):
+        return None
+    if not isinstance(window_size, (int, float)) or window_size <= 0:
+        return None
+    return round((float(token_count) / float(window_size)) * 100)
+
+
+def label_for(task):
+    return task.get("label") or task.get("name") or task.get("id") or "subagent"
+
+
+def cwd_leaf(task):
+    cwd = task.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        return None
+    leaf = os.path.basename(os.path.normpath(cwd))
+    return leaf or cwd
+
+
+def main():
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        return 0
+
+    for task in payload.get("tasks", []):
+        if not isinstance(task, dict):
+            continue
+        task_id = task.get("id")
+        if not task_id:
+            continue
+
+        parts = [label_for(task)]
+        status = task.get("status")
+        if status:
+            parts.append(str(status))
+
+        percent = pct(task.get("tokenCount"), task.get("contextWindowSize"))
+        if percent is not None:
+            parts.append(f"{percent}%")
+
+        leaf = cwd_leaf(task)
+        if leaf and leaf != parts[0]:
+            parts.append(leaf)
+
+        print(json.dumps({"id": task_id, "content": " · ".join(parts)}))
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,65 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "coordkit-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Verify repo tests
+        run: make test
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#coordkit-v}"
+          if [ "$version" = "$tag" ] || [ -z "$version" ]; then
+            echo "Tag must look like coordkit-vX.Y.Z" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release metadata
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          manifest_version="$(jq -r '.version' plugins/coordkit/.claude-plugin/plugin.json)"
+          if [ "$manifest_version" != "$version" ]; then
+            echo "Plugin manifest version ($manifest_version) does not match tag version ($version)" >&2
+            exit 1
+          fi
+
+          if ! grep -Eq "^##[[:space:]]+$version([[:space:]]|\$)" plugins/coordkit/CHANGELOG.md; then
+            echo "Changelog does not contain a section for version $version" >&2
+            exit 1
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CoordKit ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          draft: false
