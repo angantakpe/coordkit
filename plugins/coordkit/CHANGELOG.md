@@ -202,9 +202,8 @@ entries are no longer on disk but remain in git history
   onto the same key.
 - **`init-git.sh` reads the correct bus-directory environment variable**, so
   git-transport initialization lands in the configured bus root.
-- **`gc.sh`'s legacy-bus migration is race-safe.** Migrating a pre-4.0.0
-  `.claude-bus/` directory can no longer collide with a live instance writing to
-  it.
+- **`gc.sh` only manages `.coordkit-bus/`.** The cleanup path no longer carries
+  legacy bus-directory migration logic.
 - **`ledger.sh` delta injection tolerates malformed lines** instead of aborting
   the whole injection on one bad record.
 - **Torn-line race in the git transport's sync path** — partially written
@@ -260,15 +259,9 @@ entries are no longer on disk but remain in git history
 ## 4.1.0
 
 ### Added
-- **`cobus gc` migrates the pre-4.0.0 bus directory name.** coordkit used to
-  write state to `<repo>/.claude-bus/`; the 4.0.0 host/adapter reframe renamed
-  it to `<repo>/.coordkit-bus/` in code, but that rename doesn't touch state
-  already on disk — a repo that ran pre-4.0.0 coordkit is left with a stale
-  `.claude-bus/` next to (or instead of) the new `.coordkit-bus/`. `gc` now
-  detects it: a plain rename (no data lost) if `.coordkit-bus/` doesn't exist
-  yet, folded into the same `--apply` pass as everything else; otherwise just
-  a report, since merging two independent `ledger.jsonl` histories risks
-  colliding `seq` numbers and isn't attempted automatically.
+- **`cobus gc` only prunes `.coordkit-bus/`.** The 4.0.0 host/adapter rename is
+  now treated as historical context only; live cleanup stays on the current bus
+  directory and does not attempt to migrate older layouts.
 
 ## 4.0.0
 

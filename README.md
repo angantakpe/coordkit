@@ -578,13 +578,9 @@ shared ledger and all history irreversibly, for every instance:
 cobus gc --nuke --yes-i-am-sure --apply
 ```
 
-`cobus gc` also migrates the pre-4.0.0 bus directory name: coordkit used to
-write state to `.claude-bus/`, renamed to `.coordkit-bus/` at 4.0.0. If a repo
-still has a `.claude-bus/` sitting next to (or instead of) `.coordkit-bus/`,
-`cobus gc` finds it — a plain rename if `.coordkit-bus/` doesn't exist yet (no
-data lost, folded straight into the same `--apply` pass), or just a report if
-both exist (it won't auto-merge two `ledger.jsonl` histories — remove the
-legacy one yourself once you've checked it).
+If a repo still has a legacy pre-4.0.0 bus directory sitting next to (or
+instead of) `.coordkit-bus/`, remove it before or after running `cobus gc`.
+`cobus gc` now only manages `.coordkit-bus/` itself.
 
 Persistent identity (site id, clock counter) lives in `${CLAUDE_PLUGIN_DATA}`,
 which **survives plugin updates** (the versioned `${CLAUDE_PLUGIN_ROOT}` cache does not).

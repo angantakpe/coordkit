@@ -83,7 +83,7 @@ __logstore_common() {
 # scripts/common.sh, so the ledger's own state and the transport's segment state
 # can never split across two different trees. Precedence:
 #
-#   COORDKIT_BUS_ROOT / CLAUDE_BUS_ROOT / CODEX_BUS_ROOT >
+#   COORDKIT_BUS_ROOT / CODEX_BUS_ROOT >
 #   git toplevel > nearest ancestor with .coordkit-bus/ >
 #   COORDKIT_PROJECT_DIR / CLAUDE_PROJECT_DIR / CODEX_PROJECT_DIR > cwd
 #

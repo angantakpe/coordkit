@@ -36,8 +36,7 @@ room="${1:-default}"
 remote="${2:-}"
 
 # Must be inside a git repo (git mode replicates over a git remote). This is
-# deliberately NOT the shared resolve_root(): that one honours CLAUDE_BUS_ROOT
-# verbatim and falls back to a non-git cwd, whereas git mode needs the true git
+# deliberately NOT the shared resolve_root(): git mode needs the true git
 # toplevel and must HARD-FAIL when there isn't one.
 repo="$(git -C "$(ck_project_dir)" rev-parse --show-toplevel 2>/dev/null)" || {
   echo "coordkit init-git: not inside a git repo. git mode needs a git remote." >&2

@@ -397,7 +397,7 @@ ck_git_info_exclude_add() { # <repo-root> <pattern>
 
 # --------------------------------------------------------------------------- #
 # resolve_root <cwd> — THE repo-root rule. Precedence:
-#   COORDKIT_BUS_ROOT / CLAUDE_BUS_ROOT / CODEX_BUS_ROOT >
+#   COORDKIT_BUS_ROOT / CODEX_BUS_ROOT >
 #   git toplevel > nearest ancestor with .coordkit-bus/ >
 #   COORDKIT_PROJECT_DIR / CLAUDE_PROJECT_DIR / CODEX_PROJECT_DIR > cwd
 #
@@ -438,7 +438,7 @@ ck_main_worktree() {
 resolve_root() {
   local cwd="$1" top main dir
   # explicit pin wins over everything — lets sibling non-git subdirs share one bus
-  if ck_first_env COORDKIT_BUS_ROOT CLAUDE_BUS_ROOT CODEX_BUS_ROOT; then return; fi
+  if ck_first_env COORDKIT_BUS_ROOT CODEX_BUS_ROOT; then return; fi
   top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"
   if [ -n "$top" ]; then
     main="$(ck_main_worktree "$cwd")"

@@ -22,5 +22,6 @@ catalog, independent of any host adapter.
 - `commands/catalog.json` - shared command-intent catalog.
 
 Host-specific adapters and command wrappers stay under `plugins/coordkit/`.
-Its `scripts/` directory is a synchronized distribution copy of this runtime so
-installed plugins do not depend on files outside their cache.
+Its `scripts/` directory now contains thin wrappers that defer into
+`scripts/core/scripts/`, so installed plugins do not depend on files outside
+their cache and the runtime stays single-sourced.
