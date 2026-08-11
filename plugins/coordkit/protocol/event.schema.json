@@ -14,7 +14,7 @@
     },
     "eid": {
       "type": "string",
-      "description": "Content-addressed id over canonical(event minus eid,sig). The cross-replica DEDUP key and audit anchor. e.g. \"sha256:9f3c…\" (blake3 if b3sum is present)."
+      "description": "Content-addressed id over the item-level delta {schema_version,actor,sid,host,branch,type,subject,body,refs,tags,lease} — NOT the whole envelope; volatile per-emission fields (clock, ts, id, seq, eid, sig) are excluded so a genuine duplicate (re-)emission of the same logical event hashes identically. The cross-replica DEDUP key and audit anchor. e.g. \"sha256:9f3c…\" (blake3 if b3sum is present)."
     },
     "id": {
       "type": "string",

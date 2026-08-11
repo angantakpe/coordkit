@@ -72,12 +72,16 @@ ck_ensure_signing_key() {
   return 0
 }
 
-# Canonicalize EXACTLY the way eid is computed in _ck_emit_v2 (ledger.sh,
-# `_ck_emit_v2`, the `eid="${hasher}:$(... | jq -Sc 'del(.eid,.sig)' ...)"`
-# line): sorted-keys compact JSON with BOTH eid and sig dropped. Signing over
-# these same bytes is what keeps a signature and the eid computed over
-# consistent, matching input — and keeps adding a signature from ever changing
-# an event's eid, per the schema's `sig` field note.
+# Canonicalize the FULL envelope minus eid/sig: sorted-keys compact JSON with
+# BOTH dropped. This is deliberately broader than the eid hash input — `eid`
+# (ledger.sh, `_ck_emit_v2`) is an item-level delta hash over just the fields
+# that define an event's logical identity ({schema_version,actor,sid,host,
+# branch,type,subject,body,refs,tags,lease}), so genuine duplicate re-emissions
+# collide on eid; a signature, by contrast, exists to catch tampering with ANY
+# field (including seq/ts/clock), so it canonicalizes over everything except
+# the two fields that are computed FROM this canonical form (eid) or added
+# AFTER it (sig) — dropping them is what keeps adding a signature from ever
+# changing an event's eid, per the schema's `sig` field note.
 ck_canonicalize_event() {  # $1 = event JSON
   printf '%s' "$1" | jq -Sc 'del(.eid,.sig)' 2>/dev/null
 }

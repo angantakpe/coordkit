@@ -275,7 +275,19 @@ _ck_emit_v2() {  # seq type subject body refs tags lease -> one v2 JSON line on 
     --arg type "$type" --arg subject "$subject" --arg body "$body" \
     --argjson refs "$refs" --argjson tags "$tags" --argjson lease "$lease_obj" --arg id "$id" \
     '{schema_version:$sv,eid:"",id:$id,actor:$actor,clock:{p:$p,c:$c},seq:$seq,ts:$ts,sid:$sid,sid8:$sid8,host:$host,user:$user,branch:$br,type:$type,subject:$subject,body:$body,refs:$refs,tags:$tags,lease:$lease,supersedes:null,sig:null}' 2>/dev/null)"
-  eid="${hasher}:$(printf '%s' "$base" | jq -Sc 'del(.eid,.sig)' 2>/dev/null | "$hcmd" 2>/dev/null | cut -d' ' -f1 | cut -c1-32)"
+  # eid = item-level delta hash, NOT a whole-payload hash: hashed over only the
+  # fields that define this event's logical identity/content — the fields a
+  # genuine duplicate (re-)emission would share. Deliberately EXCLUDES per-emission
+  # volatile fields that differ on every call even for the same logical event:
+  # `clock` (wall-clock p + Lamport c), `ts`, `id` (random suffix), and `seq`
+  # (a local, per-writer allocation from max_seq — two replicas independently
+  # emitting the same logical event mint different seqs, and a retry that
+  # re-runs this function rather than re-sending the original line gets a fresh
+  # seq too; hashing it in would make the dedup this v2 envelope exists to
+  # provide never actually fire). `eid`/`sig` are excluded as before.
+  eid="${hasher}:$(printf '%s' "$base" | jq -Sc \
+    '{schema_version,actor,sid,host,branch,type,subject,body,refs,tags,lease}' 2>/dev/null \
+    | "$hcmd" 2>/dev/null | cut -d' ' -f1 | cut -c1-32)"
   printf '%s' "$base" | jq -c --arg eid "$eid" '.eid=$eid' 2>/dev/null
 }
 
