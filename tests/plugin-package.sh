@@ -39,8 +39,10 @@ for runtime in "$ROOT/plugins/coordkit/scripts/core/scripts"/*; do
   dist="$PLUGIN/scripts/$name"
   case "$name" in
     *.sh)
-      if [ "$name" = "common.sh" ]; then
-        expected="$(cat <<EOF
+      case "$name" in
+        common.sh)
+          # Library-only: no CLI dispatch of its own, so sourcing is always safe.
+          expected="$(cat <<EOF
 #!/usr/bin/env bash
 # shellcheck shell=bash
 script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)"
@@ -48,15 +50,34 @@ script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)"
 return 0 2>/dev/null || exit 0
 EOF
 )"
-      else
-        expected="$(cat <<EOF
+          ;;
+        bus.sh|guard.sh)
+          # Both executed directly (cbus/cobus: `exec bus.sh <phase>`) and
+          # sourced for their functions (adapters/codex/hook.sh). `exec`ing
+          # unconditionally here would replace the sourcing shell's process
+          # instead of defining functions in it, so branch on whether this
+          # wrapper itself was invoked as the top-level script or sourced.
+          expected="$(cat <<EOF
+#!/usr/bin/env bash
+# shellcheck shell=bash
+script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)"
+if [ "\${BASH_SOURCE[0]:-\$0}" = "\$0" ]; then
+  exec bash "\${script_dir}/core/scripts/${name}" "\$@"
+fi
+. "\${script_dir}/core/scripts/${name}" || return 1
+EOF
+)"
+          ;;
+        *)
+          expected="$(cat <<EOF
 #!/usr/bin/env bash
 # shellcheck shell=bash
 script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)"
 exec bash "\${script_dir}/core/scripts/${name}" "\$@"
 EOF
 )"
-      fi
+          ;;
+      esac
       [ -f "$dist" ] && [ "$(cat "$dist")" = "$expected" ] || {
         printf 'plugin runtime wrapper drift: plugins/coordkit/scripts/%s is not a thin wrapper delegating to core/scripts/%s\n' "$name" "$name" >&2
         exit 1
