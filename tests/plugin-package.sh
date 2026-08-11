@@ -30,12 +30,45 @@ test -x "$PLUGIN/scripts/repo-memory-gate.sh"
 test -x "$PLUGIN/scripts/agent-runtime.py"
 test -x "$PLUGIN/bin/coordkit-monitor"
 test -x "$PLUGIN/bin/coordkit-subagent-statusline"
+# Since "collapse duplicate coordkit wrappers", plugins/coordkit/scripts/*.sh
+# are thin delegating wrappers (not literal copies) around
+# plugins/coordkit/scripts/core/scripts/*.sh — only non-.sh runtime files
+# (e.g. agent-runtime.py) are still expected to be byte-identical copies.
 for runtime in "$ROOT/plugins/coordkit/scripts/core/scripts"/*; do
   name="${runtime##*/}"
-  cmp -s "$runtime" "$PLUGIN/scripts/$name" || {
-    printf 'plugin runtime drift: plugins/coordkit/scripts/core/scripts/%s != plugins/coordkit/scripts/%s\n' "$name" "$name" >&2
-    exit 1
-  }
+  dist="$PLUGIN/scripts/$name"
+  case "$name" in
+    *.sh)
+      if [ "$name" = "common.sh" ]; then
+        expected="$(cat <<EOF
+#!/usr/bin/env bash
+# shellcheck shell=bash
+script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)"
+. "\${script_dir}/core/scripts/${name}" || exit 1
+return 0 2>/dev/null || exit 0
+EOF
+)"
+      else
+        expected="$(cat <<EOF
+#!/usr/bin/env bash
+# shellcheck shell=bash
+script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)"
+exec bash "\${script_dir}/core/scripts/${name}" "\$@"
+EOF
+)"
+      fi
+      [ -f "$dist" ] && [ "$(cat "$dist")" = "$expected" ] || {
+        printf 'plugin runtime wrapper drift: plugins/coordkit/scripts/%s is not a thin wrapper delegating to core/scripts/%s\n' "$name" "$name" >&2
+        exit 1
+      }
+      ;;
+    *)
+      cmp -s "$runtime" "$dist" || {
+        printf 'plugin runtime drift: plugins/coordkit/scripts/core/scripts/%s != plugins/coordkit/scripts/%s\n' "$name" "$name" >&2
+        exit 1
+      }
+      ;;
+  esac
 done
 for protocol in "$PLUGIN/protocol"/*; do
   [ -f "$protocol" ] || continue
