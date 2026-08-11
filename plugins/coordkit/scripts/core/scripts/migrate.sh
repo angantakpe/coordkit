@@ -92,7 +92,15 @@ fi
     --arg sv "2.0" --arg actor "$actor" --argjson p "$p" --argjson c "$c" --argjson seq "$seq" \
     --argjson ts "$ts" --arg id "$id" --argjson epoch "$epoch" \
     '{schema_version:$sv,eid:"",id:$id,actor:$actor,clock:{p:$p,c:$c},seq:$seq,ts:$ts,type:"note",subject:"_schema",body:"coordkit v2 envelope active",refs:[],tags:["schema-upgrade"],epoch:$epoch,lease:null,supersedes:null,sig:null}' 2>/dev/null)"
-  eid="${hasher}:$(printf '%s' "$base" | jq -Sc 'del(.eid,.sig)' 2>/dev/null | "$hcmd" 2>/dev/null | cut -d' ' -f1 | cut -c1-32)"
+  # eid formula MUST match ledger.sh's _ck_emit_v2 exactly (item-level delta
+  # hash over the logical-identity fields, not the whole envelope) — see that
+  # function's comment for why. This marker doesn't set sid/host/branch/refs/
+  # tags/lease above, so those simply hash as null/[] via jq's object-shorthand
+  # construction; that's fine since idempotency here is keyed on tag+epoch, not
+  # on eid, but the formula itself must not drift from the one true definition.
+  eid="${hasher}:$(printf '%s' "$base" | jq -Sc \
+    '{schema_version,actor,sid,host,branch,type,subject,body,refs,tags,lease}' 2>/dev/null \
+    | "$hcmd" 2>/dev/null | cut -d' ' -f1 | cut -c1-32)"
   line="$(printf '%s' "$base" | jq -c --arg eid "$eid" '.eid=$eid' 2>/dev/null)"
   [ -n "$line" ] || { echo "coordkit migrate: could not build the marker event" >&2; exit 1; }
   logstore_append "$line" || { echo "coordkit migrate: append failed" >&2; exit 1; }

@@ -289,4 +289,38 @@ race_readall="$(
 )"
 test "$(printf '%s\n' "$race_readall" | grep -c 'sha256:race-' || true)" -eq 24
 
+# eid = item-level delta hash, not a whole-payload hash (COORD-0001, commit
+# e27a628): a genuine duplicate re-emission of the same logical event must
+# collide on eid even though seq/ts/clock/id (excluded from the hash) differ
+# on every _ck_emit_v2 call. Changing a field that IS part of the identity
+# set ({schema_version,actor,sid,host,branch,type,subject,body,refs,tags,
+# lease}) — here, body — must change the eid.
+eid_tmp="$(mktemp -d /tmp/coordkit-eid.XXXXXX)"
+git -C "$eid_tmp" init -q
+mkdir -p "$eid_tmp/.coordkit-bus"
+eid_ledger="$eid_tmp/.coordkit-bus/ledger.jsonl"
+emit_eid_note() {
+  env COORDKIT_PLUGIN_ROOT="$PLUGIN" COORDKIT_PLUGIN_DATA="$eid_tmp/plugin-data" \
+    COORDKIT_PROJECT_DIR="$eid_tmp" COORDKIT_SESSION_ID=eid-writer COORDKIT_HOST=codex \
+    bash "$PLUGIN/scripts/ledger.sh" note "$1" >/dev/null
+}
+emit_eid_note "identical logical content"
+emit_eid_note "identical logical content"
+emit_eid_note "different logical content"
+eid_seqs="$(jq -r '.seq' "$eid_ledger")"
+test "$(printf '%s\n' "$eid_seqs" | sort -u | wc -l | tr -d ' ')" -eq 3
+eid_one="$(sed -n '1p' <<<"$(jq -r '.eid' "$eid_ledger")")"
+eid_two="$(sed -n '2p' <<<"$(jq -r '.eid' "$eid_ledger")")"
+eid_three="$(sed -n '3p' <<<"$(jq -r '.eid' "$eid_ledger")")"
+[ -n "$eid_one" ] && [ -n "$eid_two" ] && [ -n "$eid_three" ]
+test "$eid_one" = "$eid_two" || {
+  printf 'eid did not collide for two identical-content note emissions (item-level delta hash regression?): %s != %s\n' "$eid_one" "$eid_two" >&2
+  exit 1
+}
+test "$eid_one" != "$eid_three" || {
+  printf 'eid collided for two note emissions with different bodies (hash is not sensitive to identity fields)\n' >&2
+  exit 1
+}
+rm -rf "$eid_tmp"
+
 echo "ledger token governor: ok"
