@@ -22,6 +22,10 @@ and release expectations. For plugin-runtime specifics, also read
   metadata.
 - `.codex/skills/context/SKILL.md`: repository-embedded context-gathering
   instructions.
+- `WORKFLOW.md`: live configuration for the Symphony autonomous orchestrator, an
+  external daemon that polls this repo's Linear project and drives unattended
+  Codex agents through ticket automation. Not legacy docs; do not move, delete,
+  or migrate it into `docs/`.
 
 ## Local Context Workflow
 
