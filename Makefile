@@ -19,5 +19,6 @@ test-fast:
 
 test: test-fast
 	bash tests/token-budget-ledger.sh
+	bash tests/linear-bridge.sh
 	bash tests/hook-context-compact.sh
 	bash tests/relay-e2e.sh

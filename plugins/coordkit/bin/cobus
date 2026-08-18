@@ -70,6 +70,17 @@ Setup / transport:
   agents <command>            validate, list, route, render, or compile the
                               bundled Markdown subagent definitions. Run
                               `cobus agents --help` for the runtime contract.
+
+Linear bridge (docs/LINEAR.md):
+  linear pull [--state ..] [--assignee me]
+                              Linear issues → ledger tasks (linear-<id>), idempotent
+  linear push [ID..|--all]    ledger claims/notes/blocks/done → ONE persistent
+                              `coordkit ledger` comment per issue + state/label
+  linear sync [--loop <s>]    pull then push; --loop = foreground daemon
+  linear link <task> <ID>     map an existing ledger task onto a Linear issue
+  linear status               mapping table, last sync, auth presence
+                              (add --dry-run to print mutations instead of sending;
+                              LINEAR_API_KEY comes from the env, never coord.toml)
 EOF
 }
 
@@ -89,6 +100,7 @@ case "${1:-}" in
   fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;
   swarm)    shift; exec bash "${ROOT}/scripts/worker-runtime.sh" "$@" ;;
   agents)   shift; exec python3 "${ROOT}/scripts/agent-runtime.py" "$@" ;;
+  linear)   shift; exec bash "${ROOT}/scripts/linear.sh" "$@" ;;
 esac
 
 if [ ! -x "$LEDGER" ]; then

@@ -33,6 +33,9 @@ should stay aligned with the core package.
 - `route-research-for-testing` - derive route contracts from edited files and
   validate them with a read-only subagent.
 - `tasks` - show the shared command-center task board.
+- `linear` - bridge Linear and the shared ledger: pull issues onto the task
+  board, push claims/notes/blocks/done back into one persistent comment per
+  issue (see `docs/LINEAR.md`).
 
 ## Wrapper guidance
 

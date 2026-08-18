@@ -88,6 +88,14 @@
         "codex": "$coordkit route-research-for-testing",
         "cli": "cobus route-research-for-testing"
       }
+    },
+    "linear": {
+      "description": "Bridge Linear issues and the shared ledger: pull issues as tasks, push claims/notes/blocks/done into one persistent Linear comment per issue.",
+      "surfaces": {
+        "claude-code": "/linear",
+        "codex": "$coordkit linear",
+        "cli": "cobus linear"
+      }
     }
   }
 }

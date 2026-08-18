@@ -16,6 +16,27 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## Unreleased
+
+### Added
+- `cobus linear pull|push|sync|link|status` — a Linear ⇄ ledger bridge
+  (`scripts/linear.sh`, bash + jq + curl, config in coord.toml `[linear]`,
+  key only via `LINEAR_API_KEY`). `pull` upserts matching Linear issues as
+  ledger tasks `linear-<identifier>` idempotently; `push` mirrors claim owner
+  (actor/user/session/host + branch), notes, block reason and completion into
+  ONE persistent coordkit-owned comment per issue (created once, updated in
+  place, marker `<!-- coordkit:ledger:v1 … -->`, disjoint from Symphony's
+  `## Codex Workpad`), transitions the issue to `claim_state`/`done_state`
+  (never demoting), and adds/removes a `blocked` label; `sync --loop` is a
+  SIGINT-safe foreground daemon; `--dry-run` prints mutations. Retries with
+  backoff on network/429/5xx; missing key exits 2 with a clear pointer.
+  See `docs/LINEAR.md`, `commands/linear.md`, `tests/linear-bridge.sh`
+  (offline, GraphQL stubbed via `COORDKIT_LINEAR_CURL`).
+- Ledger machine-facing verbs for bridges: `task-as <subject> "<desc>" [refs]
+  [tags]` (explicit-subject idempotent task upsert), `tasks-json [prefix]`
+  (projected board as JSONL), `events [prefix]` (raw read-view events as
+  JSONL). Existing verbs and hook phases are unchanged.
+
 ## 5.2.1
 
 ### Changed
