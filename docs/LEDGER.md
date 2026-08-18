@@ -299,6 +299,13 @@ block <subj> "<why>"  mark blocked
 trust | distrust      allow/revoke this repo's coord.toml-driven sharing
 compact               snapshot projections, bump the schema compaction epoch
                       (see §7 — SessionStart now auto-queues this as a task)
+
+machine-facing verbs (for bridges such as scripts/linear.sh — see LINEAR.md):
+task-as <subj> "<desc>" [refs_json] [tags_json]
+                      queue/upsert a task under an EXPLICIT subject; idempotent
+                      (no event when the projected description is identical)
+tasks-json [prefix]   the projected board as JSONL ({subject,status,description})
+events [prefix]       raw ledger events (the read view) as JSONL
 ```
 
 ## 7. Compaction — snapshot, and now self-scheduling

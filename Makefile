@@ -20,6 +20,7 @@ test-fast:
 test: test-fast
 	bash tests/dispatch.sh
 	bash tests/token-budget-ledger.sh
+	bash tests/linear-bridge.sh
 	bash tests/hook-context-compact.sh
 	bash tests/relay-e2e.sh
 	bash tests/presence.sh

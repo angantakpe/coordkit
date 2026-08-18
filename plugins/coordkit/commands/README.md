@@ -42,6 +42,9 @@ should stay aligned with the core package.
 - `dispatch` - hand a task to another machine (or to whoever is capable and
   idle) with lease/expiry/handoff; accept, renew, release, done, reap, ls,
   worker. See `docs/DISPATCH.md`.
+- `linear` - bridge Linear and the shared ledger: pull issues onto the task
+  board, push claims/notes/blocks/done back into one persistent comment per
+  issue (see `docs/LINEAR.md`).
 
 ## Wrapper guidance
 

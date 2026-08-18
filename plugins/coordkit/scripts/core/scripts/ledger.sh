@@ -53,6 +53,8 @@
 # By hand / slash commands (/led, /ctx):
 #   digest|catchup    full paginated digest      board   task board
 #   note|decide|ask|answer|task|claim|next|done|block   write events
+#   task-as|tasks-json|events   machine-facing verbs for bridges (scripts/linear.sh):
+#                     explicit-subject idempotent task upsert, JSONL board, raw events
 #   trust|distrust    allow/revoke THIS repo's committed coord.toml activating
 #                     git/relay sharing on this machine (see the trust gate below)
 #   compact           snapshot the projections + bump schema/MANIFEST.json's
@@ -1191,7 +1193,55 @@ case "$phase" in
     [ -z "$subj" ] && { echo "usage: ... block <subject> \"<why>\""; exit 0; }
     s="$(append_event block "$subj" "${why:-blocked}")"; echo "⛔ '${subj}' marked blocked (seq ${s})"; exit 0 ;;
 
-  *) echo "phases: start|prompt|digest|board|note|decide|ask|answer|task|claim|next|done|done-text|block|trust|distrust|compact"; exit 0 ;;
+  # ── machine-facing verbs (used by scripts/linear.sh and other bridges) ──────
+  # task-as <subject> "<desc>" [refs_json] [tags_json] — queue/upsert a task under
+  # an EXPLICIT subject (plain `task` derives the subject from the text). The
+  # subject is still slug()-normalized so `claim`/`done`/`block` on it resolve to
+  # the same row. Idempotent: when the projected task row already carries the
+  # identical description nothing is emitted (exit 0, prints "unchanged"), so a
+  # bridge can re-run its upsert on a timer — from any machine — without
+  # spamming the shared log. A changed description appends a fresh `task` event
+  # (last-write-wins in the projection); claim/done/block history is untouched.
+  task-as)
+    shift; subj="$(slug "${1:-}")"; shift || true
+    text="${1:-}"; refs="${2:-[]}"; tags="${3:-[]}"
+    { [ -z "$subj" ] || [ -z "$text" ]; } && { echo "usage: ... task-as <subject> \"<desc>\" [refs_json] [tags_json]"; exit 0; }
+    printf '%s' "$refs" | jq -e 'type=="array"' >/dev/null 2>&1 || refs='[]'
+    printf '%s' "$tags" | jq -e 'type=="array"' >/dev/null 2>&1 || tags='[]'
+    ensure_dirs
+    if proj_row "$subj" >/dev/null 2>&1 && [ "$PR_DESC" = "$(printf '%s' "$text" | tr -s '[:cntrl:]' ' ')" ]; then
+      echo "unchanged '${subj}'"; exit 0
+    fi
+    s="$(append_event task "$subj" "$text" "$refs" "$tags")"; echo "➕ task '${subj}' upserted (seq ${s})"; exit 0 ;;
+  # tasks-json [subject-prefix] — the projected task board as one JSON object per
+  # line ({subject,status,description[,claimed_by]}, matching
+  # protocol/task.schema.json's status enum: claimed:<sid8> is split into
+  # status:"claimed" + claimed_by.sid8). Read-only.
+  tasks-json)
+    shift; pfx="${1:-}"
+    ensure_dirs
+    while IFS=$US read -r s st desc; do
+      [ -n "$s" ] || continue
+      case "$s" in "$pfx"*) ;; *) continue ;; esac
+      jq -nc --arg s "$s" --arg st "$st" --arg d "$desc" '
+        {subject:$s, description:$d}
+        + (if ($st|startswith("claimed:")) then {status:"claimed", claimed_by:{sid8:($st|ltrimstr("claimed:"))}}
+           else {status:$st} end)'
+    done < <(task_rows)
+    exit 0 ;;
+  # events [subject-prefix] — dump the ledger's READ view (the deduped, ordered
+  # union in logstore mode; the flat file otherwise) as raw JSONL, optionally
+  # only events whose subject starts with the prefix. Read-only, for bridges that
+  # need the full per-subject history (claim owner, block reason, notes) rather
+  # than the collapsed projection.
+  events)
+    shift; pfx="${1:-}"
+    ensure_dirs
+    [ -s "$ledger" ] || exit 0
+    jq -Rc --arg p "$pfx" 'fromjson? | select(type=="object") | select(($p=="") or ((.subject // "")|tostring|startswith($p)))' "$ledger" 2>/dev/null
+    exit 0 ;;
+
+  *) echo "phases: start|prompt|digest|board|note|decide|ask|answer|task|claim|next|done|done-text|block|task-as|tasks-json|events|trust|distrust|compact"; exit 0 ;;
 esac
 
 }   # ── end ledger_main ─────────────────────────────────────────────────────
