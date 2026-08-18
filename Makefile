@@ -24,3 +24,4 @@ test: test-fast
 	bash tests/hook-context-compact.sh
 	bash tests/relay-e2e.sh
 	bash tests/presence.sh
+	bash tests/logseq-bridge.sh

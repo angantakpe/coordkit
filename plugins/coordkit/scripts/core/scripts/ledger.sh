@@ -258,7 +258,8 @@ ledger_emit() {  # append one prebuilt JSON line (logstore-aware)
 
 # NOTE: the emitted top-level `ts` is write-only — no read path in this file
 # consumes it (ordering and cursors key off .seq, leases off .lease.until). Kept
-# for human `jq` debugging and external consumers; do not assume it is unused.
+# for human `jq` debugging and external consumers (`board --json` / `events`
+# and the Logseq bridge read it); do not assume it is unused.
 _ck_emit_v2() {  # seq type subject body refs tags lease -> one v2 JSON line on stdout
   local seq="$1" type="$2" subject="$3" body="$4" refs="$5" tags="$6" lease="$7"
   local actor host p c lease_obj base eid id hasher="sha256" hcmd="sha256sum"
@@ -603,6 +604,45 @@ print_board() {
     [ -n "$desc" ] && printf '        %s\n' "$desc"
   done < <(task_rows)
   [ "$found" = 0 ] && echo "  (no tasks)"
+}
+
+# JSON form of the board: one object per task subject, queue order. `status` is
+# the same projected value print_board shows (open|claimed:<sid8>|done|blocked);
+# `ready` is deps_met() for open tasks. The metadata pass is a separate jq reduce
+# over the read source (not folded into ensure_proj's TSV, whose positional
+# columns are read in several hot paths) — this verb is on-demand only.
+print_board_json() {
+  ensure_proj || { echo '[]'; return; }
+  local meta s st desc ready
+  meta='{}'
+  [ -s "$ledger" ] && meta="$(jq -Rn '
+    [inputs | (try fromjson catch null) | select(type=="object")]
+    | reduce .[] as $e ({};
+        (($e.subject // "") | tostring) as $s
+        | if $s == "" then . else
+            (($e.type // "") | tostring) as $t
+            | (($e.ts // 0) | numbers) as $ts
+            | .[$s] //= {}
+            | .[$s].last_ts = $ts | .[$s].last_seq = (($e.seq // 0)|numbers) | .[$s].last_type = $t
+            | if   $t == "task"  then .[$s].task_ts = $ts | .[$s].task_seq = (($e.seq // 0)|numbers)
+                                    | .[$s].task_actor = ($e.actor // null) | .[$s].task_host = ($e.host // null)
+              elif $t == "claim" then .[$s].claim_ts = $ts | .[$s].owner_sid8 = ($e.sid8 // null)
+                                    | .[$s].owner_host = ($e.host // null) | .[$s].owner_branch = ($e.branch // null)
+                                    | .[$s].owner_actor = ($e.actor // null) | .[$s].owner_user = ($e.user // null)
+              elif $t == "done"  then .[$s].done_ts = $ts
+              elif $t == "block" then .[$s].block_ts = $ts | .[$s].block_body = (($e.body // "")|tostring)
+              else . end
+          end)' "$ledger" 2>/dev/null)"
+  [ -n "$meta" ] || meta='{}'
+  while IFS=$US read -r s st desc; do
+    [ -n "$s" ] || continue
+    ready=1
+    if [ "$st" = open ] && ! deps_met "$s" "$desc"; then ready=0; fi
+    printf '%s\x1f%s\x1f%s\x1f%s\n' "$s" "$st" "$ready" "$desc"
+  done < <(task_rows) | jq -Rn --arg US "$US" --argjson meta "$meta" '
+    [inputs | split($US)
+     | {subject: .[0], status: .[1], ready: (.[2] == "1"), desc: (.[3] // "")}
+     | . + ($meta[.subject] // {})]' 2>/dev/null || echo '[]'
 }
 
 # latest decision per subject (subject \t sid8 \t body) — single jq pass
@@ -1047,7 +1087,37 @@ case "$phase" in
     exit 0 ;;
 
   board)
+    shift
+    # `board --json`: machine-readable projection for non-human consumers (the
+    # Logseq bridge, scripts). Same task_rows()/deps_met() as the human board,
+    # plus per-subject metadata (task/claim/done timestamps, claim owner
+    # host/branch/actor) folded in from one extra jq pass over the read source.
+    case "${1:-}" in --json) ensure_dirs; print_board_json; exit 0 ;; esac
     ensure_dirs; print_board; exit 0 ;;
+
+  # ── events [--since <seq>] [--limit <n>]: raw event lines from the READ source ─
+  # Logstore-aware (refresh_view already repointed $ledger at the ordered union in
+  # git/relay mode), tolerant of garbage lines, one compact JSON object per line.
+  # Read-only; used by `cobus logseq export` for incremental journal projection.
+  events)
+    shift; ev_since=0; ev_limit=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --since) ev_since="${2:-0}"; shift 2 ;;
+        --limit) ev_limit="${2:-0}"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    case "$ev_since" in ''|*[!0-9]*) ev_since=0 ;; esac
+    case "$ev_limit" in ''|*[!0-9]*) ev_limit=0 ;; esac
+    ensure_dirs
+    [ -s "$ledger" ] || exit 0
+    if [ "$ev_limit" -gt 0 ]; then
+      jq -Rc --argjson s "$ev_since" 'fromjson? | select(type=="object") | select(((.seq // 0)|numbers) > $s)' "$ledger" 2>/dev/null | tail -n "$ev_limit"
+    else
+      jq -Rc --argjson s "$ev_since" 'fromjson? | select(type=="object") | select(((.seq // 0)|numbers) > $s)' "$ledger" 2>/dev/null
+    fi
+    exit 0 ;;
 
   # ── trust: allow THIS repo's committed coord.toml to activate git/relay sharing ─
   trust)
@@ -1229,19 +1299,8 @@ case "$phase" in
            else {status:$st} end)'
     done < <(task_rows)
     exit 0 ;;
-  # events [subject-prefix] — dump the ledger's READ view (the deduped, ordered
-  # union in logstore mode; the flat file otherwise) as raw JSONL, optionally
-  # only events whose subject starts with the prefix. Read-only, for bridges that
-  # need the full per-subject history (claim owner, block reason, notes) rather
-  # than the collapsed projection.
-  events)
-    shift; pfx="${1:-}"
-    ensure_dirs
-    [ -s "$ledger" ] || exit 0
-    jq -Rc --arg p "$pfx" 'fromjson? | select(type=="object") | select(($p=="") or ((.subject // "")|tostring|startswith($p)))' "$ledger" 2>/dev/null
-    exit 0 ;;
 
-  *) echo "phases: start|prompt|digest|board|note|decide|ask|answer|task|claim|next|done|done-text|block|task-as|tasks-json|events|trust|distrust|compact"; exit 0 ;;
+  *) echo "phases: start|prompt|digest|board [--json]|note|decide|ask|answer|task|claim|next|done|done-text|block|task-as|tasks-json|events [--since N] [--limit N]|trust|distrust|compact"; exit 0 ;;
 esac
 
 }   # ── end ledger_main ─────────────────────────────────────────────────────

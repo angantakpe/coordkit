@@ -165,6 +165,9 @@ under the hood:
   (`cobus linear pull|push|sync|link|status`): Linear issues become ledger tasks
   any machine can claim, and ledger claims/notes/blocks/done flow back into one
   persistent, coordkit-owned comment per issue plus state transitions.
+- **[docs/LOGSEQ.md](docs/LOGSEQ.md)** — the Logseq ⇄ ledger bridge:
+  `cobus logseq export/import/sync/status`, the fleet/task page projections,
+  the journal log, and the cross-machine story.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)**, **[SECURITY.md](SECURITY.md)**,
   **[SUPPORT.md](SUPPORT.md)**, and **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**
   — the public-project hygiene docs that open-source users expect to find.

@@ -128,6 +128,14 @@
         "codex": "$coordkit linear",
         "cli": "cobus linear"
       }
+    },
+    "logseq": {
+      "description": "Bridge the shared ledger into a Logseq graph: export fleet/task pages and a journal log, import #coordkit TODOs back as ledger tasks.",
+      "surfaces": {
+        "claude-code": "/logseq",
+        "codex": "$coordkit logseq",
+        "cli": "cobus logseq"
+      }
     }
   }
 }

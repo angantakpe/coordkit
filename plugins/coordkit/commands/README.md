@@ -45,6 +45,8 @@ should stay aligned with the core package.
 - `linear` - bridge Linear and the shared ledger: pull issues onto the task
   board, push claims/notes/blocks/done back into one persistent comment per
   issue (see `docs/LINEAR.md`).
+- `logseq` - bridge the shared ledger into a Logseq graph: export fleet/task
+  pages and a journal log, import `#coordkit` TODOs back as ledger tasks.
 
 ## Wrapper guidance
 

@@ -95,6 +95,16 @@ Linear bridge (docs/LINEAR.md):
   linear status               mapping table, last sync, auth presence
                               (add --dry-run to print mutations instead of sending;
                               LINEAR_API_KEY comes from the env, never coord.toml)
+
+  logseq <export|import|sync|status>
+                              Logseq ⇄ ledger bridge: project fleet/tasks pages
+                              + a journal log into a Logseq graph, and pull
+                              #coordkit TODOs back in as ledger tasks
+                              (docs/LOGSEQ.md; `cobus logseq --help`).
+
+Read-only projections (machine-readable):
+  board --json                task queue as JSON (same projection as `board`)
+  events [--since N]          raw ledger events after seq N (logstore-aware)
 EOF
 }
 
@@ -117,6 +127,7 @@ case "${1:-}" in
   agents)   shift; exec python3 "${ROOT}/scripts/agent-runtime.py" "$@" ;;
   dispatch) shift; exec bash "${ROOT}/scripts/dispatch.sh" "$@" ;;
   linear)   shift; exec bash "${ROOT}/scripts/linear.sh" "$@" ;;
+  logseq)   shift; exec bash "${ROOT}/scripts/logseq.sh" "$@" ;;
 esac
 
 if [ ! -x "$LEDGER" ]; then
