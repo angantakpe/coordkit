@@ -118,7 +118,7 @@ It ships **one plugin**:
 
 | Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **coordkit** | 5.2.1   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. The command surface is defined once as shared specs, then exposed through Claude Code slash-command wrappers, Codex skill surfaces, and native agents. |
+| **coordkit** | 5.3.0   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. The command surface is defined once as shared specs, then exposed through Claude Code slash-command wrappers, Codex skill surfaces, and native agents. |
 
 > **`coordguard` and `skillkit` have both been merged in.** Through 2.x, the
 > hard anti-clobber blocker shipped as a separate `coordguard` package. As of
@@ -141,6 +141,10 @@ under the hood:
 - **[docs/LEDGER.md](docs/LEDGER.md)** — the shared-context layer: the
   event-sourcing model, the task queue (leases, auto-claim, work-stealing),
   pagination/digests, and the non-local transport trust gate.
+- **[docs/PRESENCE.md](docs/PRESENCE.md)** — the cross-machine presence
+  layer: `cobus heartbeat` / `cobus peers` (who is alive on which machine,
+  what it is doing, with what capabilities) and `cobus watch` (a live tail of
+  the shared event stream over relay long-poll / git sync / local).
 - **[docs/architecture.md](docs/architecture.md)** — the high-level repo map:
   the recommended target layout, the current layering, and the migration
   direction.
@@ -611,3 +615,21 @@ watch -n15 '${CLAUDE_PLUGIN_ROOT}/bin/sync.sh'   # or cron / systemd timer / a b
 `sync.sh` is debounced, `flock`-guarded, and `timeout`-bounded — never call it from
 a hook (git network must stay off the tool-call critical path). Solo users who never
 run `init-git` keep the zero-dependency local default, byte-identical to today.
+
+## Presence across machines (who is alive, live tail)
+
+Once a repo shares its ledger over git or the relay, three verbs give you a live
+cross-machine picture — no new daemon or dependency, just heartbeat events on the
+same durable log (details, precedence rules and design notes in
+[docs/PRESENCE.md](docs/PRESENCE.md)):
+
+```bash
+cobus heartbeat --loop 30 --cap gpu       # on each machine, in a spare pane / systemd unit
+cobus peers                               # who is alive (age vs ttl), task, branch, caps, repo
+cobus watch --since 10m --exclude heartbeat   # follow the shared event stream live (Ctrl-C to stop)
+```
+
+Machine name comes from `COORDKIT_MACHINE`, then `coord.toml` `[machine] name`,
+then `hostname -s`; capabilities from `[machine] caps`, `COORDKIT_CAPS`, and
+`--cap k=v`. Heartbeats never appear in the hook-injected digest, and
+`cobus fleet` gains one trailing `machines` line when any exist.

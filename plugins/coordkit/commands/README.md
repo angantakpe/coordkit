@@ -23,6 +23,12 @@ should stay aligned with the core package.
 - `led` - write to or inspect the shared ledger and task queue.
 - `claim` - claim work on the shared board and show the board state.
 - `fleet` - show live coordkit usage in other repos on the same machine.
+- `heartbeat` - emit a machine-presence heartbeat (machine, actor, task, caps,
+  ttl) into the shared ledger; `--loop` for a foreground emitter.
+- `peers` - show which machines/actors are alive right now and what they are
+  doing (projection over heartbeat events).
+- `watch` - follow the shared event stream live across machines; the slash
+  wrapper only does a `--once` backfill, the follow loop belongs in a terminal.
 - `dev-docs` - create a structured planning document and companion task docs.
 - `dev-docs-update` - refresh planning docs before context compaction.
 - `statusline-setup` - install or check the host statusline badge wiring.

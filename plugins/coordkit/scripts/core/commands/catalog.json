@@ -41,6 +41,30 @@
         "cli": "cobus fleet"
       }
     },
+    "heartbeat": {
+      "description": "Emit a machine-presence heartbeat (machine, actor, task, caps, ttl) into the shared ledger.",
+      "surfaces": {
+        "claude-code": "/heartbeat",
+        "codex": "$coordkit heartbeat",
+        "cli": "cobus heartbeat"
+      }
+    },
+    "peers": {
+      "description": "Show which machines/actors are alive right now and what they are working on.",
+      "surfaces": {
+        "claude-code": "/peers",
+        "codex": "$coordkit peers",
+        "cli": "cobus peers"
+      }
+    },
+    "watch": {
+      "description": "Follow the shared event stream live across machines (relay long-poll, git sync, or local re-read).",
+      "surfaces": {
+        "claude-code": "/watch",
+        "codex": "$coordkit watch",
+        "cli": "cobus watch"
+      }
+    },
     "message": {
       "description": "Deliver a message to another live instance in the same repo.",
       "surfaces": {

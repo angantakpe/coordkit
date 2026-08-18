@@ -158,11 +158,16 @@ so a solo session sees a clean statusline.
 | `/msg <target> "<text>"` | `bus.sh msg` | Deliver a message to another live instance |
 
 | `/fleet` | `bus.sh fleet` | Cross-repo view: which OTHER repos on this machine have live coordkit sessions right now — see §9 |
+| `/heartbeat`, `/peers`, `/watch` | `presence.sh …` | Cross-MACHINE presence over the shared ledger and a live event tail — see [docs/PRESENCE.md](PRESENCE.md) |
 
 Run outside a slash command: `cbus` (alias for `bus.sh watch`, a
 2s-refresh full-screen monitor meant for a spare terminal pane), `cobus gc`
 (lifecycle cleanup — dead agents/claims/cursors, log rotation; dry-run by
-default, see its own `--help`), and `cobus fleet` (same as `/fleet`).
+default, see its own `--help`), `cobus fleet` (same as `/fleet`), and the
+presence trio `cobus heartbeat [--loop 30]` / `cobus peers` / `cobus watch`
+(who is alive on which machine + a live cross-machine event tail;
+[docs/PRESENCE.md](PRESENCE.md) — note `cobus watch` tails the shared EVENT
+stream, whereas `cbus`/`bus.sh watch` redraws this repo's bus dashboard).
 
 ## 8. The bus and guard mode
 
@@ -277,3 +282,13 @@ per-user) and MUST NEVER be routed through the git/relay ledger transport
 unlike the ledger, which a `coord.toml` can opt into sharing across machines,
 the fleet registry has no such opt-in and never leaves the machine it was
 written on.
+
+**Machines line.** The fleet listing ends with one additive line —
+`🌐 machines (shared log): N alive (…) · M stale (…)` — summarising the
+cross-MACHINE presence view of the CURRENT repo (`presence.sh peers
+--summary`, i.e. heartbeat events in this repo's shared ledger). It prints
+nothing when no heartbeat was ever emitted, so repos that don't use presence
+see the fleet output exactly as before. That line comes from the ledger, not
+from `fleet.json`, and does not weaken the privacy rule above: `fleet.json`
+still never leaves the machine. Full view: `cobus peers`; design:
+[docs/PRESENCE.md](PRESENCE.md).

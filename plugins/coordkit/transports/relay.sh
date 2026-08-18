@@ -197,6 +197,9 @@ __relay_pull_unlocked() {
     headers="$(mktemp "${dir}/.headers.XXXXXX" 2>/dev/null)" || break
     body="$(mktemp "${dir}/.body.XXXXXX" 2>/dev/null)" || { rm -f "$headers"; break; }
     query="${url}${sep}since=${cursor}&limit=${limit}"
+    # Optional server-side long-poll (server.mjs `?wait=<ms>`, capped at 25s
+    # there). Only a live tail sets this; a plain sync stays a fast GET.
+    case "${COORDKIT_RELAY_WAIT_MS:-}" in ''|*[!0-9]*) ;; *) query="${query}&wait=${COORDKIT_RELAY_WAIT_MS}" ;; esac
     local -a args=( -fsS --connect-timeout 1 --max-time "${COORDKIT_RELAY_TIMEOUT:-3}"
       -D "$headers" -o "$body" -H 'Accept: application/x-ndjson' -H "X-Coord-Room: $room" )
     [ -n "$auth" ] && args+=( -H "@$auth" )
@@ -242,6 +245,39 @@ __relay_pull() {
     rmdir "${lock}.d" 2>/dev/null || true
     return "$rc"
   fi
+}
+
+# Block until the server has events past our durably-folded cursor, or <ms>
+# elapse (server caps at 25s). Holds NO lock and folds NOTHING — it is purely a
+# wake-up so a live `cobus watch` can sit on the socket without starving a
+# sibling's __relay_pull (which holds .pull.lock for the whole request).
+# Returns 0 when the server reports something newer, 1 otherwise (timeout,
+# unreachable, not configured). The caller then runs the ordinary sync/readall
+# to fold what arrived.
+__relay_wait_for_events() { # <ms>
+  local ms="${1:-20000}" url room dir cursor auth="" headers latest rc=1 sep='?'
+  case "$ms" in ''|*[!0-9]*) ms=20000 ;; esac
+  [ "$ms" -gt 25000 ] && ms=25000
+  url="$(__relay_url)"; room="$(__relay_room)" || return 1
+  __relay_url_allowed "$url" || return 1
+  command -v curl >/dev/null 2>&1 || return 1
+  dir="$(__relay_channel_dir)" || return 1; mkdir -p "$dir" 2>/dev/null || return 1
+  cursor="$(cat "${dir}/cursor" 2>/dev/null)"; case "$cursor" in ''|*[!0-9]*) cursor=0 ;; esac
+  auth="$(__relay_token_header)" || return 1
+  headers="$(mktemp "${dir}/.wait.XXXXXX" 2>/dev/null)" || { [ -n "$auth" ] && rm -f "$auth"; return 1; }
+  case "$url" in *\?*) sep='&' ;; esac
+  local -a args=( -fsS --connect-timeout 1 --max-time "$(( ms / 1000 + 5 ))"
+    -D "$headers" -o /dev/null -H 'Accept: application/x-ndjson' -H "X-Coord-Room: $room" )
+  [ -n "$auth" ] && args+=( -H "@$auth" )
+  [ -n "${COORDKIT_RELAY_CA_FILE:-}" ] && args+=( --cacert "$COORDKIT_RELAY_CA_FILE" )
+  args+=( --url "${url}${sep}since=${cursor}&limit=1&wait=${ms}" )
+  if curl "${args[@]}" >/dev/null 2>&1; then
+    latest="$(awk 'tolower($0) ~ /^x-coord-latest:/ {gsub("\\r", ""); sub(/^[^:]+:[[:space:]]*/, ""); v=$0} END{print v}' "$headers")"
+    case "$latest" in ''|*[!0-9]*) ;; *) [ "$latest" -gt "$cursor" ] && rc=0 ;; esac
+  fi
+  rm -f "$headers" 2>/dev/null
+  [ -n "$auth" ] && rm -f "$auth" 2>/dev/null
+  return "$rc"
 }
 
 __relay_sync() {
