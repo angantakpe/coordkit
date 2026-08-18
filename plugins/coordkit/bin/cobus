@@ -70,6 +70,15 @@ Setup / transport:
   agents <command>            validate, list, route, render, or compile the
                               bundled Markdown subagent definitions. Run
                               `cobus agents --help` for the runtime contract.
+  logseq <export|import|sync|status>
+                              Logseq ⇄ ledger bridge: project fleet/tasks pages
+                              + a journal log into a Logseq graph, and pull
+                              #coordkit TODOs back in as ledger tasks
+                              (docs/LOGSEQ.md; `cobus logseq --help`).
+
+Read-only projections (machine-readable):
+  board --json                task queue as JSON (same projection as `board`)
+  events [--since N]          raw ledger events after seq N (logstore-aware)
 EOF
 }
 
@@ -89,6 +98,7 @@ case "${1:-}" in
   fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;
   swarm)    shift; exec bash "${ROOT}/scripts/worker-runtime.sh" "$@" ;;
   agents)   shift; exec python3 "${ROOT}/scripts/agent-runtime.py" "$@" ;;
+  logseq)   shift; exec bash "${ROOT}/scripts/logseq.sh" "$@" ;;
 esac
 
 if [ ! -x "$LEDGER" ]; then

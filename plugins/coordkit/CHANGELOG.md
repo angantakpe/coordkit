@@ -16,6 +16,40 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## 5.3.0
+
+### Added
+- `cobus logseq export|import|sync|status` — a Logseq ⇄ ledger bridge. `export`
+  projects the shared ledger/bus state into a Logseq graph as
+  `pages/<namespace>___fleet.md` (live sessions/repos),
+  `pages/<namespace>___tasks.md` (one Logseq TODO/DOING/DONE/WAITING block per
+  ledger task, keyed by a `coordkit-task::` property so re-exports update the
+  same block in place instead of duplicating it), and an append-only bullet
+  per notable event in today's journal. `import` scans the graph for
+  `#coordkit`-tagged TODO/LATER/NOW/DOING blocks (or anything on the
+  `<namespace>/inbox` page) and queues them as real ledger tasks, writing the
+  assigned subject back into the block so it isn't re-imported; a block
+  marked `DONE` closes the matching ledger task, and a ledger task completed
+  elsewhere flips its Logseq block to `DONE` on the next export. `sync`
+  chains import + export, optionally in a foreground `--loop <secs>`, and
+  optionally pushes live updates through Logseq's local HTTP API when
+  configured. New `[logseq]` table in `coord.toml`
+  (`graph_dir`/`namespace`/`tag`/`journal_format`/`linear_workspace`/
+  `api_url`, `LOGSEQ_API_TOKEN` env for the API). New `/logseq` command,
+  `docs/LOGSEQ.md`, and `tests/logseq-bridge.sh`. See `docs/LOGSEQ.md`.
+- `ledger.sh board --json` — the task board as machine-readable JSON (subject,
+  status, ready, description, plus claim/task/done timestamps and owner
+  host/branch/actor where applicable), the same projection `board` renders
+  for humans. `ledger.sh events [--since <seq>] [--limit <n>]` — raw ledger
+  event lines after a given seq, logstore-aware. Both are read-only and exist
+  primarily for the Logseq bridge and other non-human consumers, but are
+  general-purpose (`cobus board --json`, `cobus events`).
+- `bus.sh fleet --json [repo]` (`cobus fleet --json`) — the cross-repo fleet
+  view as one JSON document: this machine's registered repos, each with its
+  live/idle session counts, branches, and per-agent detail (sid8, host,
+  state, age, branch, cwd, task, files). Read-only, same liveness formula as
+  the human `fleet` view.
+
 ## 5.2.1
 
 ### Changed

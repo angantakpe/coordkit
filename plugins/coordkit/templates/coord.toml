@@ -111,3 +111,29 @@ repeat_ttl_seconds = 3600
 # auto-activation suggests only the highest-ranked matches per prompt.
 metrics_max_bytes = 262144
 skill_top_k = 1
+
+# LOGSEQ BRIDGE — `cobus logseq export|import|sync|status` (see docs/LOGSEQ.md).
+# Uncommented / empty by default: the bridge is opt-in and requires graph_dir.
+# Every key can be overridden per-machine with COORDKIT_LOGSEQ_<KEY> in the
+# environment, so this table is safe to commit even when graph_dir differs
+# per clone.
+#[logseq]
+# Path to your Logseq graph root (must contain pages/ and journals/). A
+# leading "~" is expanded. No default — required for export/import/sync.
+#graph_dir = "/home/you/logseq/my-graph"
+# Page-name prefix: "<namespace>/fleet" and "<namespace>/tasks" (Logseq file
+# naming: "coordkit/fleet" -> "coordkit___fleet.md").
+#namespace = "coordkit"
+# Import scans for this hashtag (no leading "#") on TODO/LATER/NOW/DOING
+# blocks, plus anything on the "<namespace>/inbox" page regardless of tag.
+#tag = "coordkit"
+# Logseq's journal file naming pattern (its own default shown here).
+#journal_format = "yyyy_MM_dd"
+# Optional: render a "linear:COD-123" reference in a task's description as a
+# clickable Linear URL on export.
+#linear_workspace = ""
+# Optional: Logseq's local HTTP API (Settings -> Features -> Developer mode),
+# for live-refreshing an already-open Logseq window on `sync`. The bearer
+# token is supplied out-of-band via LOGSEQ_API_TOKEN, never here. File mode
+# (export/import) works fully without this.
+#api_url = ""

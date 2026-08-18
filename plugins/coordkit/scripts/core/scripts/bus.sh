@@ -109,7 +109,10 @@ hashkey() {
 # dashboard/watch take a repo arg; everything else reads hook/statusline JSON.
 case "$phase" in
   dashboard|watch|frame|fleet)
-    input=""; cwd="${2:-$PWD}"; sid="cli" ;;
+    input=""; cwd="${2:-$PWD}"; sid="cli"
+    # `fleet --json [repo]`: machine-readable form (see the fleet phase below).
+    FLEET_JSON=0
+    if [ "$phase" = fleet ] && [ "${2:-}" = "--json" ]; then FLEET_JSON=1; cwd="${3:-$PWD}"; fi ;;
   claim|done|tasks|heartbeat)
     # Real session id when available (falls back to "cli" for a bare shell
     # invocation) — these delegate to the ledger's task queue, whose lease/
@@ -783,6 +786,36 @@ case "$phase" in
   # pruned from the registry, under the same lock fleet_register() uses.
   fleet)
     fd="$(ck_data_dir)/fleet.json"
+    # --json: same registry + the same per-repo liveness formula, as one JSON
+    # document for non-human consumers (`cobus logseq export`). Read-only — it
+    # never prunes the registry — and it always lists THIS repo's own bus even
+    # when it has not registered yet, so a caller sees its own sessions.
+    if [ "${FLEET_JSON:-0}" = 1 ]; then
+      t="$(now)"
+      { [ -s "$fd" ] && jq -r '.repos // {} | keys[]' "$fd" 2>/dev/null; printf '%s\n' "$root"; } \
+        | awk 'NF && !seen[$0]++' | sort | while IFS= read -r p; do
+          [ -d "$p" ] || continue
+          reg=0; [ -s "$fd" ] && jq -e --arg p "$p" '.repos[$p] != null' "$fd" >/dev/null 2>&1 && reg=1
+          agents_json="$(for af in "${p}/.coordkit-bus/agents"/*.json; do
+              [ -e "$af" ] || continue
+              jq -c --argjson t "$t" --argjson soft "$STALE_SOFT" --argjson hard "$STALE_HARD" '
+                (($t - ((.last_seen // 0)|numbers)) ) as $age
+                | select($age <= $hard)
+                | {sid8: ((.sid // "")|tostring|.[0:8]), host: (.host // "unknown"),
+                   state: (if $age > $soft then "idle" else "live" end), age: $age,
+                   last_seen: (.last_seen // 0), branch: (.branch // "?"), cwd: (.cwd // ""),
+                   task: (.task // ""), files: (.files // [])}' "$af" 2>/dev/null
+            done | jq -sc '.' 2>/dev/null)"
+          [ -n "$agents_json" ] || agents_json='[]'
+          jq -nc --arg p "$p" --arg root "$root" --argjson reg "$reg" --argjson agents "$agents_json" '
+            {path: $p, this_repo: ($p == $root), registered: ($reg == 1),
+             live: ([$agents[] | select(.state == "live")] | length),
+             idle: ([$agents[] | select(.state == "idle")] | length),
+             branches: ([$agents[].branch] | unique), agents: $agents}'
+        done | jq -sc --argjson t "$t" --arg host "$(hostname 2>/dev/null || echo unknown)" \
+          '{ts: $t, machine: $host, repos: .}'
+      exit 0
+    fi
     if [ ! -s "$fd" ]; then
       echo "🛰️  coordkit fleet — no repos registered yet (a repo registers itself on its next coordkit heartbeat)."
       exit 0

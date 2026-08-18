@@ -88,6 +88,14 @@
         "codex": "$coordkit route-research-for-testing",
         "cli": "cobus route-research-for-testing"
       }
+    },
+    "logseq": {
+      "description": "Bridge the shared ledger into a Logseq graph: export fleet/task pages and a journal log, import #coordkit TODOs back as ledger tasks.",
+      "surfaces": {
+        "claude-code": "/logseq",
+        "codex": "$coordkit logseq",
+        "cli": "cobus logseq"
+      }
     }
   }
 }

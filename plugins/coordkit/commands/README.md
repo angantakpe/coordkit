@@ -33,6 +33,8 @@ should stay aligned with the core package.
 - `route-research-for-testing` - derive route contracts from edited files and
   validate them with a read-only subagent.
 - `tasks` - show the shared command-center task board.
+- `logseq` - bridge the shared ledger into a Logseq graph: export fleet/task
+  pages and a journal log, import `#coordkit` TODOs back as ledger tasks.
 
 ## Wrapper guidance
 
