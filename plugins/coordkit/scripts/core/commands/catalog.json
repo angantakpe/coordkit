@@ -88,6 +88,14 @@
         "codex": "$coordkit route-research-for-testing",
         "cli": "cobus route-research-for-testing"
       }
+    },
+    "dispatch": {
+      "description": "Hand a task to another machine (or to whoever is capable and idle) with lease, expiry, and handoff; accept/renew/release/done/reap/ls/worker.",
+      "surfaces": {
+        "claude-code": "/dispatch",
+        "codex": "$coordkit dispatch",
+        "cli": "cobus dispatch"
+      }
     }
   }
 }

@@ -16,6 +16,25 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## Unreleased
+
+### Added
+- `cobus dispatch` — cross-machine task dispatch (COD-844). From any machine,
+  hand a ledger task to a specific machine (`--to desktop[/actor]`) or to
+  whoever is capable and idle (`--needs gpu=1`), with a lease so nothing is
+  lost when a laptop closes: `accept [--auto]`, `renew`, `release`, `done`,
+  `reap` (lapsed leases reopen the dispatch), `ls`, `peers`, `whoami`, and a
+  `worker [--exec cmd]` loop that syncs, accepts, runs the command with
+  `COORDKIT_DISPATCH_ID` / `COORDKIT_TASK_ID` / `COORDKIT_TASK_TITLE`
+  exported, renews while it runs, and completes or releases on exit. State is
+  a projection over new `dispatch.*` events (no `seq`, so they stay out of the
+  ledger digest); races resolve first-accept-wins on read by
+  `(clock.p, eid)` with epoch-tagged accepts. Works in local/git/relay mode;
+  relay flushes immediately, git syncs on create. New
+  `protocol/dispatch.schema.json`, `commands/dispatch.md`, `docs/DISPATCH.md`,
+  `tests/dispatch.sh`. Reads (does not implement) the `heartbeat` presence
+  contract: top-level `machine`, `actor`, `caps`, `task`, `ttl_s`, `ts`.
+
 ## 5.2.1
 
 ### Changed

@@ -35,7 +35,7 @@
     },
     "seq": {
       "type": "integer",
-      "description": "LOCAL-only convenience counter (per physical log). NOT authoritative for cross-machine order — use clock."
+      "description": "LOCAL-only convenience counter (per physical log). NOT authoritative for cross-machine order — use clock. OPTIONAL: dispatch.* and heartbeat events deliberately omit it so they stay out of the ledger's seq-keyed digest/board projections."
     },
     "sid":    { "type": "string", "description": "Originating host session id." },
     "sid8":   { "type": "string", "description": "First 8 chars of sid (display)." },
@@ -44,13 +44,15 @@
     "branch": { "type": "string", "description": "Git branch at write time (or \"no-git\")." },
     "type": {
       "type": "string",
-      "description": "Event type. KNOWN types: note, decision, question, answer, task, claim, done, block. This list is DOCUMENTATION, not a closed set — readers MUST tolerate unknown types as opaque notes, so validation accepts any string. Producers SHOULD stick to the known types.",
+      "description": "Event type. KNOWN types: note, decision, question, answer, task, claim, done, block; cross-machine dispatch (dispatch.schema.json): dispatch, dispatch.accepted, dispatch.renewed, dispatch.released, dispatch.expired, dispatch.done; presence: heartbeat. This list is DOCUMENTATION, not a closed set — readers MUST tolerate unknown types as opaque notes, so validation accepts any string. Producers SHOULD stick to the known types.",
       "anyOf": [
-        { "enum": ["note", "decision", "question", "answer", "task", "claim", "done", "block"] },
+        { "enum": ["note", "decision", "question", "answer", "task", "claim", "done", "block", "dispatch", "dispatch.accepted", "dispatch.renewed", "dispatch.released", "dispatch.expired", "dispatch.done", "heartbeat"] },
         { "type": "string" }
       ]
     },
-    "subject": { "type": "string", "description": "Reconciliation key: the latest non-superseded event per subject wins." },
+    "subject": { "type": "string", "description": "Reconciliation key: the latest non-superseded event per subject wins. For dispatch.* events the subject is the dispatch id (d-<hex>)." },
+    "machine": { "type": "string", "description": "OPTIONAL. Human-facing machine name of the producer (COORDKIT_MACHINE > coord.toml [machine] name > hostname -s). Distinct from `host` (the adapter identity) and `actor` (the stable site id). Stamped by dispatch.* and heartbeat events; absent on classic ledger events." },
+    "dispatch": { "type": "object", "description": "OPTIONAL. Present on dispatch.* events only: the structured dispatch payload, a mirror of the JSON carried in `body` (which is what the eid covers). See dispatch.schema.json." },
     "body":    { "type": "string", "description": "Free-text payload. A task body may carry 'dep:<subject>' tokens for ordering." },
     "refs":    { "type": "array", "items": { "type": "string" }, "description": "Content refs (eids) instead of fragile numeric seq refs." },
     "tags":    { "type": "array", "items": { "type": "string" } },

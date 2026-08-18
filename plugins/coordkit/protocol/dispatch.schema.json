@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coordkit/schema/dispatch/1.0",
+  "title": "coordkit cross-machine dispatch payload",
+  "description": "Payload of the dispatch.* event family (`cobus dispatch`, scripts/core/scripts/dispatch.sh). It rides in the event envelope's `body` as a compact JSON string (covered by the eid) and is mirrored as the envelope's top-level `dispatch` object. The envelope `subject` is the dispatch id. Dispatch state is a PROJECTION: replay one id's events in (clock.p, create-first, eid) order — open → accepted → done | released | expired; released/expired reopen the dispatch for another accept (new epoch); the first `dispatch.accepted` per epoch wins. Events carry no `seq`. See docs/DISPATCH.md.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "ts"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^d-[0-9a-f]+$", "description": "Dispatch id (also the envelope subject)." },
+    "ts": { "type": "integer", "description": "Epoch seconds when this event was written (lease math uses this; ordering uses the envelope clock.p)." },
+    "task": { "type": "string", "description": "Ledger task subject (slug) this dispatch hands over. Present on `dispatch` and `dispatch.accepted`." },
+    "title": { "type": "string", "description": "`dispatch` only: the task's human title (exported to a worker child as COORDKIT_TASK_TITLE)." },
+    "target": {
+      "type": "object",
+      "description": "`dispatch` only: who may accept. Empty object = anyone. All present constraints must hold.",
+      "properties": {
+        "machine": { "type": "string", "description": "Exact machine name (see envelope `machine`)." },
+        "actor": { "type": "string", "description": "Exact stable site id (ck_actor)." },
+        "needs": {
+          "type": "object",
+          "description": "Capability requirements: every key must be present and truthy in the acceptor's caps; a string value must equal the acceptor's value (\"*\", \"\" or true mean 'present').",
+          "additionalProperties": { "type": ["string", "boolean"] }
+        }
+      }
+    },
+    "lease_s": { "type": "integer", "description": "`dispatch` only: lease length in seconds granted on accept/renew (default 1800)." },
+    "priority": { "type": "integer", "description": "`dispatch` only: lower is picked first by `accept --auto` (default 5)." },
+    "note": { "type": "string", "description": "`dispatch` only: free text for the acceptor." },
+    "from": { "$ref": "#/$defs/who", "description": "`dispatch` only: requester." },
+    "by": { "$ref": "#/$defs/who", "description": "accepted/renewed/released/done: the machine+actor performing the transition." },
+    "holder": { "$ref": "#/$defs/who", "description": "`dispatch.expired` only: whose lapsed lease was reaped." },
+    "reaped_by": { "$ref": "#/$defs/who", "description": "`dispatch.expired` only: who ran `reap`." },
+    "lease_until": { "type": "integer", "description": "accepted/renewed/expired: epoch seconds the lease is (was) valid until. Also mirrored in the envelope `lease.until`." },
+    "epoch": { "type": "integer", "description": "`dispatch.accepted` only: the open epoch being accepted (1 on first open, +1 after each release/expiry). An accept whose epoch does not match the current epoch on read is ignored." },
+    "reason": { "type": "string", "description": "`dispatch.released` only: why (e.g. 'worker command exited 7')." }
+  },
+  "$defs": {
+    "who": {
+      "type": "object",
+      "required": ["machine", "actor"],
+      "properties": {
+        "machine": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  }
+}

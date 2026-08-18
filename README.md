@@ -95,7 +95,9 @@ Laptop B running Codex
 ```
 
 The relay makes the shared state available to agents that are not using the
-same filesystem.
+same filesystem. On top of any shared mode (git or relay), `cobus dispatch`
+hands a task from one machine to another with a lease and a worker loop —
+see [docs/DISPATCH.md](docs/DISPATCH.md).
 
 4. Host adapters - Claude Code and Codex integration
 
@@ -141,6 +143,10 @@ under the hood:
 - **[docs/LEDGER.md](docs/LEDGER.md)** — the shared-context layer: the
   event-sourcing model, the task queue (leases, auto-claim, work-stealing),
   pagination/digests, and the non-local transport trust gate.
+- **[docs/DISPATCH.md](docs/DISPATCH.md)** — cross-machine task dispatch
+  (`cobus dispatch`): hand a task to a specific machine or to whoever is
+  capable and idle, with leases, expiry/reap, first-accept-wins race
+  resolution, the `worker` loop, and the presence (heartbeat) contract.
 - **[docs/architecture.md](docs/architecture.md)** — the high-level repo map:
   the recommended target layout, the current layering, and the migration
   direction.

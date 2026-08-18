@@ -10,7 +10,8 @@
     "task",
     "message",
     "event",
-    "transport"
+    "transport",
+    "dispatch"
   ],
   "invariants": [
     "history is append-only",
@@ -24,6 +25,7 @@
   "current_implementation": {
     "agent_schema": "plugins/coordkit/protocol/agent.schema.json",
     "claim_schema": "plugins/coordkit/protocol/claim.schema.json",
+    "dispatch_schema": "plugins/coordkit/protocol/dispatch.schema.json",
     "event_schema": "plugins/coordkit/protocol/event.schema.json",
     "message_schema": "plugins/coordkit/protocol/message.schema.json",
     "session_schema": "plugins/coordkit/protocol/session.schema.json",

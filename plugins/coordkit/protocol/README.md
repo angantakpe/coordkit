@@ -250,7 +250,8 @@ The next package boundary should turn this document into code:
 
 - `plugins/coordkit/protocol/` for shared types and schemas;
 - `plugins/coordkit/protocol/agent.schema.json`, `session.schema.json`, `claim.schema.json`,
-  `task.schema.json`, `message.schema.json`, `event.schema.json`, and
+  `task.schema.json`, `message.schema.json`, `event.schema.json`,
+  `dispatch.schema.json` (cross-machine dispatch payload, see `docs/DISPATCH.md`), and
   `transport.schema.json`
   for the protocol envelopes and projections that move across the bus and
   ledger;

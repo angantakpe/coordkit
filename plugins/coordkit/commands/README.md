@@ -33,6 +33,9 @@ should stay aligned with the core package.
 - `route-research-for-testing` - derive route contracts from edited files and
   validate them with a read-only subagent.
 - `tasks` - show the shared command-center task board.
+- `dispatch` - hand a task to another machine (or to whoever is capable and
+  idle) with lease/expiry/handoff; accept, renew, release, done, reap, ls,
+  worker. See `docs/DISPATCH.md`.
 
 ## Wrapper guidance
 

@@ -24,6 +24,10 @@ Run the bundled scripts from that root; do not assume `cobus` is on `PATH`.
 - Guard mode: run `bash <root>/scripts/guard.sh status|on|off`.
 - Relay status or synchronization: run `bash <root>/bin/cobus relay-status|relay-sync`.
 - Relay setup: run `bash <root>/bin/cobus init-relay <https-url> [room]`; it never stores the token.
+- Hand a task to another machine (cross-machine dispatch with lease/expiry):
+  run `bash <root>/bin/cobus dispatch '<title>' [--to machine[/actor]] [--needs k=v,..] [--lease s]`;
+  on the target `bash <root>/bin/cobus dispatch accept --auto` (or `worker --exec '<cmd>'`),
+  then `renew|release|done <id>`, `reap`, `ls`. See `docs/DISPATCH.md`.
 - Trust or revoke a committed Git/relay pointer: run `bash <root>/bin/cobus trust|distrust`.
 - Context-cost diagnostics: inspect the newest records in
   `<repo>/.coordkit-bus/metrics/context.ndjson`; metrics are local data and are
@@ -41,4 +45,6 @@ When reporting results, distinguish:
 - bus file claims, which are advisory;
 - guard fingerprint denials, which are hard only in `guard` mode;
 - ledger task leases, which can expire and are not distributed locks;
+- dispatch leases, which are the same kind of thing across machines: first
+  accept wins on read, a lapsed lease is reopened by `reap`;
 - relay delivery, which is durable through the configured backing plus replay.

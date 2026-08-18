@@ -18,6 +18,7 @@ test-fast:
 	bash tests/agent-runtime.sh
 
 test: test-fast
+	bash tests/dispatch.sh
 	bash tests/token-budget-ledger.sh
 	bash tests/hook-context-compact.sh
 	bash tests/relay-e2e.sh

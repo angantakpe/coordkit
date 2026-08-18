@@ -70,6 +70,12 @@ Setup / transport:
   agents <command>            validate, list, route, render, or compile the
                               bundled Markdown subagent definitions. Run
                               `cobus agents --help` for the runtime contract.
+  dispatch <task|"title"> [--to <machine[/actor]>] [--needs k=v,..] [--lease s]
+                              hand a task to another machine (cross-machine
+                              dispatch with lease/expiry/handoff). Sub-verbs:
+                              accept [--auto] | renew | release | done | reap |
+                              ls | worker [--exec cmd] | peers | whoami.
+                              `cobus dispatch --help` for the full contract.
 EOF
 }
 
@@ -89,6 +95,7 @@ case "${1:-}" in
   fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;
   swarm)    shift; exec bash "${ROOT}/scripts/worker-runtime.sh" "$@" ;;
   agents)   shift; exec python3 "${ROOT}/scripts/agent-runtime.py" "$@" ;;
+  dispatch) shift; exec bash "${ROOT}/scripts/dispatch.sh" "$@" ;;
 esac
 
 if [ ! -x "$LEDGER" ]; then
