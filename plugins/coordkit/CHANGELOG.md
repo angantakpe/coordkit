@@ -16,7 +16,7 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
-## Unreleased
+## 5.3.0
 
 ### Added
 - `cobus dispatch` — cross-machine task dispatch (COD-844). From any machine,
@@ -34,6 +34,41 @@ entries are no longer on disk but remain in git history
   `protocol/dispatch.schema.json`, `commands/dispatch.md`, `docs/DISPATCH.md`,
   `tests/dispatch.sh`. Reads (does not implement) the `heartbeat` presence
   contract: top-level `machine`, `actor`, `caps`, `task`, `ttl_s`, `ts`.
+- **Machine presence + realtime tail** (`docs/PRESENCE.md`, COD-844). New
+  `plugins/coordkit/scripts/core/scripts/presence.sh` (dist wrapper
+  `scripts/presence.sh`) behind three `cobus` verbs and matching `/heartbeat`,
+  `/peers`, `/watch` command specs + catalog intents:
+  - `cobus heartbeat [--task <id>] [--cap k[=v]]... [--ttl <s>] [--loop <s>]`
+    appends a `heartbeat` ledger event through the normal transport
+    (local/git/relay) carrying `machine` (`COORDKIT_MACHINE` > `coord.toml`
+    `[machine] name` > `hostname -s`), `actor`, session/pid, cwd/repo,
+    branch, current task/claim, `caps` (merged from `[machine] caps` <
+    `COORDKIT_CAPS` < `--cap`), `ts` and `ttl_s` (default 90). `--loop`
+    re-emits in the foreground and drains the relay outbox each tick.
+    Heartbeats carry NO `seq` (so `ledger.sh` digests/boards never show them)
+    and their `eid` INCLUDES `ts` (each tick is a distinct liveness signal,
+    never deduped). `host` keeps its adapter meaning; the machine name is a
+    new top-level `machine` field.
+  - `cobus peers [--json] [--all] [--summary]` — projection over heartbeat
+    events: one row per (machine, actor, session) with alive/stale (age vs
+    ttl), age, task, branch, caps, repo. Reads via `logstore_readall`, so it
+    works in every mode (relay pulls first).
+  - `cobus watch [--since 10m|all|<watermark>|<actor-cursors>] [--filter
+    <types>] [--exclude <types>] [--json|--pretty] [--interval <s>] [--once]`
+    — live, lossless (per-actor `clock.c` cursors) tail of the shared stream:
+    relay long-poll, `__git_sync` per interval, or local re-read; colored per
+    type on a TTY; exits 0 on SIGINT/SIGTERM.
+- `transports/relay.sh`: `__relay_wait_for_events <ms>` (lock-free long-poll
+  wake-up using the server's existing `?wait=`) and `COORDKIT_RELAY_WAIT_MS`
+  honoured by the ordinary pull.
+- `cobus fleet` / `/fleet` now ends with an additive `🌐 machines (shared
+  log): …` line (from `presence.sh peers --summary`) — printed only when a
+  heartbeat exists, so existing fleet output is otherwise unchanged.
+- `protocol/event.schema.json`: `heartbeat` documented as a known type plus
+  the `machine`, `caps`, `task`, `ttl_s`, `presence` properties.
+- `tests/presence.sh` (wired into `make test`): emit → alive, ttl → stale,
+  digest/board exclusion, `watch --once` backfill/filter, live local watch +
+  SIGTERM, fleet line, and a relay long-poll case (skipped without node/curl).
 
 ## 5.2.1
 

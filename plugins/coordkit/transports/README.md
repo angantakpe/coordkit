@@ -131,6 +131,14 @@ validated acknowledgement, and optional long polling. It enforces a single
 process per data directory. See
 `plugins/coordkit/apps/relay/README.md` for deployment settings.
 
+Long polling on the client side: `__relay_wait_for_events <ms>` issues one
+`GET ?since=<cursor>&limit=1&wait=<ms>` (server cap 25s) holding **no** lock
+and folding nothing — it returns 0 as soon as the server reports a newer
+cursor, so a live tail (`cobus watch`, `docs/PRESENCE.md`) can sit on the
+socket while a sibling's `__relay_pull` still gets `.pull.lock`. Setting
+`COORDKIT_RELAY_WAIT_MS` makes the ordinary pull long-poll too (a plain
+`cobus relay-sync` never sets it, so syncs stay fast GETs).
+
 ## Incremental reads: use per-actor cursors
 
 - `logstore_actor_cursors` returns a compact JSON map of each actor to its

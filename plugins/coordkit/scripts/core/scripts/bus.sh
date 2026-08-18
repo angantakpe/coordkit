@@ -336,6 +336,19 @@ collisions() {
 # STALE_HARD against last_seen) so liveness isn't redefined a second time,
 # just re-applied to a different agents/ directory.
 # Prints "<live>\t<idle>\t<branch1,branch2,...>".
+# Cross-MACHINE counterpart of the fleet view: one trailing summary line of
+# who is alive on which machine according to THIS repo's shared log
+# (heartbeat events, docs/PRESENCE.md). Additive — prints nothing when no
+# heartbeat has ever been emitted, so the existing fleet output is unchanged
+# for repos that don't use presence. Delegates to presence.sh (which reads
+# via the transport union, so it works in local/git/relay alike).
+fleet_presence_summary() {
+  local pres
+  pres="${COORDKIT_CORE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}/scripts/presence.sh"
+  [ -f "$pres" ] || return 0
+  COORDKIT_PROJECT_DIR="$cwd" bash "$pres" peers --summary 2>/dev/null || true
+}
+
 fleet_repo_stats() {
   local repo_root="$1" af al abr aage live=0 idle=0 branches="" t; t="$(now)"
   for af in "${repo_root}/.coordkit-bus/agents"/*.json; do
@@ -785,11 +798,13 @@ case "$phase" in
     fd="$(ck_data_dir)/fleet.json"
     if [ ! -s "$fd" ]; then
       echo "🛰️  coordkit fleet — no repos registered yet (a repo registers itself on its next coordkit heartbeat)."
+      fleet_presence_summary
       exit 0
     fi
     paths="$(jq -r '.repos // {} | keys[]' "$fd" 2>/dev/null | sort)"
     if [ -z "$paths" ]; then
       echo "🛰️  coordkit fleet — no repos registered yet."
+      fleet_presence_summary
       exit 0
     fi
     printf '🛰️  coordkit fleet  %s\n' "$(iso)"
@@ -816,6 +831,7 @@ case "$phase" in
         printf '%s' "$cur" > "${fd}.tmp" 2>/dev/null && mv "${fd}.tmp" "$fd" 2>/dev/null
       ) 9>"${fd}.lock" 2>/dev/null
     fi
+    fleet_presence_summary
     exit 0
     ;;
 

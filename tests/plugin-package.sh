@@ -38,6 +38,9 @@ for runtime in "$ROOT/plugins/coordkit/scripts/core/scripts"/*; do
   name="${runtime##*/}"
   dist="$PLUGIN/scripts/$name"
   case "$name" in
+    # claude-mem drops a gitignored per-directory context stub (see .gitignore);
+    # it is a session artifact, not a runtime file, so it must not fail drift.
+    CLAUDE.local.md) continue ;;
     *.sh)
       case "$name" in
         common.sh)

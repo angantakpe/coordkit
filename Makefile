@@ -22,3 +22,4 @@ test: test-fast
 	bash tests/token-budget-ledger.sh
 	bash tests/hook-context-compact.sh
 	bash tests/relay-e2e.sh
+	bash tests/presence.sh

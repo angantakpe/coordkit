@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "coordkit",
   "displayName": "coordkit",
-  "version": "5.2.1",
+  "version": "5.3.0",
   "description": "Multi-host coordination for Claude Code and Codex: a per-repo bus, durable shared ledger, optional authenticated cross-machine relay, and opt-in anti-clobber guard. Warn-only by default. Heartbeats identify their host, so collision and subagent messages distinguish Claude Code, Codex, and CLI instances.",
   "author": {
     "name": "codehornets",

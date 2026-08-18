@@ -30,7 +30,10 @@ ordering is live for shared modes).
 
 `type` is one of `note | decision | question | answer | task | claim | done |
 block` (readers tolerate unknown types as opaque notes, so this isn't a
-strictly closed set). `subject` is the **reconciliation key**: for any given
+strictly closed set), plus the out-of-band `heartbeat` presence event
+([docs/PRESENCE.md](PRESENCE.md)) which rides the same log but carries no
+`seq`, so none of the projections below ever see it. `subject` is the
+**reconciliation key**: for any given
 subject, the *latest* event of a given type wins. There is no in-place mutable
 state anywhere — "is this task done?" is answered by scanning for the newest
 `task`/`claim`/`done`/`block` event on that subject, not by reading a stored

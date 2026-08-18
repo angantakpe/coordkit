@@ -38,6 +38,14 @@ Verbs:
   fleet                       cross-repo view: which OTHER repos have live
                               coordkit sessions right now (local-only, never
                               shared — see docs/BUS.md §9)
+  heartbeat [--task <id>] [--cap k=v]... [--ttl <s>] [--loop <s>]
+                              emit a machine-presence heartbeat into the shared
+                              log; --loop re-emits forever (docs/PRESENCE.md)
+  peers [--json] [--all]      who is alive on which machine (projection over
+                              heartbeat events, works in every transport mode)
+  watch [--since 10m|all] [--filter <type,..>] [--json]
+                              live tail of the shared event stream across
+                              machines (relay long-poll / git sync / local)
   board                       show the projected task queue
   digest | catchup            full shared-context digest
   note "<text>"               drop a durable note for all instances
@@ -93,6 +101,7 @@ case "${1:-}" in
   migrate)  shift; exec bash "${ROOT}/scripts/migrate.sh" "$@" ;;
   gc)       shift; exec bash "${ROOT}/scripts/gc.sh" "$@" ;;
   fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;
+  heartbeat|peers|watch) exec bash "${ROOT}/scripts/presence.sh" "$@" ;;
   swarm)    shift; exec bash "${ROOT}/scripts/worker-runtime.sh" "$@" ;;
   agents)   shift; exec python3 "${ROOT}/scripts/agent-runtime.py" "$@" ;;
   dispatch) shift; exec bash "${ROOT}/scripts/dispatch.sh" "$@" ;;

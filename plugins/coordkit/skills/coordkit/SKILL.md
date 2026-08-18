@@ -16,6 +16,13 @@ Run the bundled scripts from that root; do not assume `cobus` is on `PATH`.
 
 - Live sessions and collision risks: run `bash <root>/scripts/bus.sh dashboard "$PWD"`.
 - Cross-repo local fleet: run `bash <root>/scripts/bus.sh fleet "$PWD"`.
+- Cross-machine presence (who is alive on which machine, what it is doing):
+  run `bash <root>/scripts/presence.sh peers`; emit this machine's own
+  heartbeat with `bash <root>/scripts/presence.sh heartbeat [--task <id>] [--cap k=v]`;
+  a one-shot backfill of the shared stream is
+  `bash <root>/scripts/presence.sh watch --once --since 10m --no-color`
+  (the follow loop `--loop`/`watch` without `--once` is for a terminal, not a
+  skill call). See `docs/PRESENCE.md`.
 - Shared context or task board: prefer the targeted `board`; run `digest` when
   the user asks for the broader shared record or an automatic summary says
   items were omitted.

@@ -44,7 +44,7 @@
     "branch": { "type": "string", "description": "Git branch at write time (or \"no-git\")." },
     "type": {
       "type": "string",
-      "description": "Event type. KNOWN types: note, decision, question, answer, task, claim, done, block; cross-machine dispatch (dispatch.schema.json): dispatch, dispatch.accepted, dispatch.renewed, dispatch.released, dispatch.expired, dispatch.done; presence: heartbeat. This list is DOCUMENTATION, not a closed set — readers MUST tolerate unknown types as opaque notes, so validation accepts any string. Producers SHOULD stick to the known types.",
+      "description": "Event type. KNOWN types: note, decision, question, answer, task, claim, done, block; cross-machine dispatch (dispatch.schema.json): dispatch, dispatch.accepted, dispatch.renewed, dispatch.released, dispatch.expired, dispatch.done; presence: heartbeat. This list is DOCUMENTATION, not a closed set — readers MUST tolerate unknown types as opaque notes, so validation accepts any string. Producers SHOULD stick to the known types. `heartbeat` (presence, docs/PRESENCE.md) is out-of-band: it carries NO `seq` (so ledger projections/digests skip it), its eid INCLUDES ts (each tick is a distinct liveness signal, never deduped), and it adds the top-level machine/caps/task/ttl_s/presence fields below.",
       "anyOf": [
         { "enum": ["note", "decision", "question", "answer", "task", "claim", "done", "block", "dispatch", "dispatch.accepted", "dispatch.renewed", "dispatch.released", "dispatch.expired", "dispatch.done", "heartbeat"] },
         { "type": "string" }
@@ -56,6 +56,24 @@
     "body":    { "type": "string", "description": "Free-text payload. A task body may carry 'dep:<subject>' tokens for ordering." },
     "refs":    { "type": "array", "items": { "type": "string" }, "description": "Content refs (eids) instead of fragile numeric seq refs." },
     "tags":    { "type": "array", "items": { "type": "string" } },
+    "caps":    { "type": "object", "additionalProperties": { "type": ["string", "boolean"] }, "description": "PRESENCE: capabilities k -> string|true, merged from coord.toml [machine] caps < env COORDKIT_CAPS < --cap flags." },
+    "task":    { "type": ["string", "null"], "description": "PRESENCE: the task/claim subject this machine/session is currently on, or null." },
+    "ttl_s":   { "type": "integer", "description": "PRESENCE: seconds after `ts` during which the sender is considered alive (default 90); older -> stale." },
+    "presence": {
+      "type": "object",
+      "description": "PRESENCE: the full record — {machine, pid, session, cwd, repo:{root,name,remote}, branch, task, caps, ttl_s}. The top-level machine/caps/task/ttl_s are the contract; this is the superset for humans/debugging.",
+      "properties": {
+        "machine": { "type": "string" },
+        "pid":     { "type": ["integer", "null"] },
+        "session": { "type": "string" },
+        "cwd":     { "type": "string" },
+        "repo":    { "type": "object", "properties": { "root": { "type": "string" }, "name": { "type": "string" }, "remote": { "type": ["string", "null"] } } },
+        "branch":  { "type": "string" },
+        "task":    { "type": ["string", "null"] },
+        "caps":    { "type": "object" },
+        "ttl_s":   { "type": "integer" }
+      }
+    },
     "lease": {
       "description": "ALWAYS an object from v2 onward (never a bare scalar). null when not a claim.",
       "oneOf": [
