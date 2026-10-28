@@ -3,6 +3,15 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      full_suite:
+        description: Explicitly run every regression test
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -12,6 +21,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -21,5 +32,26 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Run repo tests
-        run: make test
+      - name: Select affected tests
+        id: tests
+        if: ${{ !inputs.full_suite }}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        shell: bash
+        run: |
+          if [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]]; then
+            BASE="$(git rev-parse HEAD^)"
+          fi
+          selected="$(python3 scripts/select-tests.py --base "$BASE")"
+          echo "files=$selected" >> "$GITHUB_OUTPUT"
+          printf 'Selected tests: %s\n' "${selected:-none (documentation only)}"
+
+      - name: Run focused regression tests
+        if: ${{ !inputs.full_suite && steps.tests.outputs.files != '' }}
+        env:
+          TESTS: ${{ steps.tests.outputs.files }}
+        run: make test TESTS="$TESTS"
+
+      - name: Run explicitly requested full suite
+        if: ${{ inputs.full_suite }}
+        run: make test-all

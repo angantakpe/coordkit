@@ -7,6 +7,37 @@ and semver-versioned instead of a hand-wired set of host-specific hook scripts.
 This repository ships Claude Code and Codex adapters as one plugin named
 `coordkit`, plus an optional authenticated relay server for cross-machine use.
 
+## Quick start
+
+Local coordination needs Bash 4+, `jq`, Python 3.11+, and Git. Node 20+ is required
+for the optional relay service and repository validation. The stock macOS
+`/bin/bash` is too old; install a current Bash and make sure the agent host uses
+it before installing the plugin.
+
+Claude Code:
+
+```text
+/plugin marketplace add angantakpe/coordkit
+/plugin install coordkit@coordkit
+```
+
+Codex CLI:
+
+```bash
+codex plugin marketplace add angantakpe/coordkit
+codex plugin add coordkit@coordkit
+```
+
+Start a new host session after installation. In Codex, open `/hooks`, review the
+CoordKit command hooks, and approve their exact hashes. Then run `/bus` in
+Claude Code or `$coordkit bus` in Codex to see the current repository sessions.
+Use `/ctx`, `$coordkit`, or `cobus digest` for the shared task and decision
+context. `cobus` is available when the host adds the plugin's `bin/` directory
+to `PATH`; host commands remain the portable option.
+
+CoordKit starts in `warn` mode: it records activity and reports likely file
+collisions without denying edits. The hard stale-edit guard is opt-in.
+
 ## What CoordKit actually does
 
 CoordKit acts like a coordination layer between coding-agent sessions.
@@ -24,9 +55,11 @@ helps them answer:
 - What context should be injected into a new agent session?
 
 The canonical coordination runtime lives in `plugins/coordkit/scripts/core/scripts`.
-`plugins/coordkit/scripts` contains synchronized distribution copies so the
-installed plugin remains self-contained inside a versioned host cache; package
-tests reject drift between those two trees.
+The shell files directly under `plugins/coordkit/scripts` are checked-in thin
+wrappers that delegate to that core. Non-shell runtime artifacts that have a
+distribution copy are kept byte-for-byte aligned. Package tests reject wrapper
+or artifact drift so the installed plugin remains self-contained inside a
+versioned host cache.
 
 ## The architecture
 
@@ -120,7 +153,7 @@ It ships **one plugin**:
 
 | Plugin             | Version | Contract                                                          | What it does                                                                                                                                                                                                                                                                                               |
 | ------------------ | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **coordkit** | 5.3.0   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. The command surface is defined once as shared specs, then exposed through Claude Code slash-command wrappers, Codex skill surfaces, and native agents. |
+| **coordkit** | 5.3.1   | **WARN-only by default; opt-in HARD guard** | A per-repo bus + append-only ledger + host-attributed collision warnings + an authenticated relay with outbox/replay + an anti-clobber guard. The command surface is defined once as shared specs, then exposed through Claude Code slash-command wrappers, Codex skill surfaces, and native agents. |
 
 > **`coordguard` and `skillkit` have both been merged in.** Through 2.x, the
 > hard anti-clobber blocker shipped as a separate `coordguard` package. As of
@@ -131,7 +164,8 @@ It ships **one plugin**:
 > have either installed separately, `/plugin update` won't fix it (the
 > marketplace no longer serves them as separate entries) — run
 > `/plugin uninstall coordguard@coordkit` and/or
-> `/plugin uninstall skillkit@coordkit` manually. See [Install](#install).
+> `/plugin uninstall skillkit@coordkit` manually. See
+> [Install details](#install-details).
 
 ## Documentation
 
@@ -184,7 +218,7 @@ small toolchain:
 
 - Bash 4 or newer
 - `jq`
-- `python3`
+- Python 3.11+ (`python3`)
 - `make`
 - `node` 20 or newer for the relay service and `node --check`
 - `git`
@@ -402,22 +436,24 @@ dependency direction, and the plain-English explanation of each top-level area.
 This package still has three separate concerns: distribution/packaging, schema,
 and transport. The details live in the linked docs and the code itself.
 
-## Install
+## Install details
 
 Claude Code:
 
 ```bash
-# From a hosted git remote (GitHub/GitLab/git URL):
-/plugin marketplace add <owner>/coordkit
+# From the GitHub repository:
+/plugin marketplace add angantakpe/coordkit
 # ...or from a local clone:
 /plugin marketplace add ./coordkit
 
 /plugin install coordkit@coordkit
 ```
 
-Codex CLI, from a local clone:
+Codex CLI, from GitHub or a local clone:
 
 ```bash
+codex plugin marketplace add angantakpe/coordkit
+# or: codex plugin marketplace add /path/to/coordkit
 codex plugin marketplace add /path/to/coordkit
 codex plugin add coordkit@coordkit
 ```
@@ -433,7 +469,7 @@ bus and ledger. Claude also gets skill auto-activation; Codex gets the bundled
 Codex, adds hard anti-clobber enforcement for that repository.
 
 > **Distribution reality check.** The hosted
-> `/plugin marketplace add <owner>/coordkit` form works only for people who can
+> `/plugin marketplace add angantakpe/coordkit` form works only for people who can
 > clone the repository. If the repo is private or access-controlled, that means
 > the owner and anyone explicitly granted access; if it is public, it works for
 > anyone with the URL. When access is the limiting factor, the local-clone form
@@ -492,6 +528,25 @@ Updates ship by bumping the plugin `version`; users pull them with
 `/plugin marketplace update` followed by `/plugin update`.
 
 CoordKit is MIT-licensed. See [LICENSE](LICENSE).
+
+### Hook approval and updates
+
+Codex treats hook approval as content-specific. If it reports
+`plugin contents changed; hook approval required`, open `/hooks`, inspect the
+changed CoordKit definitions, and approve the new hashes. Restart the session
+after approval. Reinstalling or updating the plugin does not approve changed
+code on your behalf.
+
+If the plugin is missing after an update, check the configured marketplace and
+installed version first:
+
+```bash
+codex plugin list --marketplace coordkit --json
+```
+
+For Claude Code, run `/plugin marketplace update`, then `/plugin update`, and
+start a new session. Report unresolved install failures with the host version,
+CoordKit version, exact command, and complete error text; see [SUPPORT.md](SUPPORT.md).
 
 ## What gets wired
 

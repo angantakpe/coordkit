@@ -160,7 +160,9 @@ so a solo session sees a clean statusline.
 | `/fleet` | `bus.sh fleet` | Cross-repo view: which OTHER repos on this machine have live coordkit sessions right now — see §9 |
 | `/heartbeat`, `/peers`, `/watch` | `presence.sh …` | Cross-MACHINE presence over the shared ledger and a live event tail — see [docs/PRESENCE.md](PRESENCE.md) |
 
-Run outside a slash command: `cbus` (alias for `bus.sh watch`, a
+Run outside a slash command: `cobus msg <all|sid8|branch:name> "<text>"`
+uses the same inbox delivery path and exits non-zero when no live recipient
+matches. `cbus` is an alias for `bus.sh watch`, a
 2s-refresh full-screen monitor meant for a spare terminal pane), `cobus gc`
 (lifecycle cleanup — dead agents/claims/cursors, log rotation; dry-run by
 default, see its own `--help`), `cobus fleet` (same as `/fleet`), and the

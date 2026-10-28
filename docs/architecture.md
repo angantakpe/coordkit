@@ -88,10 +88,11 @@ coordkit/
 
 The current repository places the relay service under `plugins/coordkit/apps/relay/` and the
 canonical shared runtime under `plugins/coordkit/scripts/core/scripts/`.
-`plugins/coordkit/scripts/` contains checked-in distribution copies because
-host plugin installers copy only that plugin directory into their versioned
-caches. Package tests require those copies to match the canonical runtime. This
-is still not the full package split described above.
+Shell files directly under `plugins/coordkit/scripts/` are checked-in thin
+wrappers that delegate to the canonical core. Non-shell runtime artifacts with
+a distribution copy stay byte-for-byte aligned. Package tests validate both
+contracts because host plugin installers copy the plugin directory into a
+versioned cache. This is still not the full package split described above.
 
 `plugins/coordkit/protocol/` now exists as the explicit home for the protocol contract
 itself. It is still paired with the current shell-based schema and runtime, but
