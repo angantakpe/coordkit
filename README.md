@@ -454,7 +454,6 @@ Codex CLI, from GitHub or a local clone:
 ```bash
 codex plugin marketplace add angantakpe/coordkit
 # or: codex plugin marketplace add /path/to/coordkit
-codex plugin marketplace add /path/to/coordkit
 codex plugin add coordkit@coordkit
 ```
 
