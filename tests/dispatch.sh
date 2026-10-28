@@ -42,7 +42,7 @@ laptop dispatch whoami | q '^machine: laptop$' || fail "whoami machine"
 desktop dispatch whoami | q '"gpu":"1"' || fail "whoami caps"
 
 # 2. dispatch creates the ledger task and an open dispatch
-id="$(laptop dispatch "run heavy test suite" --needs gpu=1 --lease 3 --quiet)"
+id="$(laptop dispatch "run heavy test suite" --needs gpu=1 --lease 60 --quiet)"
 [ -n "$id" ] || fail "no dispatch id"
 laptop board | q 'run-heavy-test-suite' || fail "ledger task not created"
 [ "$(state_of laptop "$id")" = open ] || fail "expected open after dispatch"

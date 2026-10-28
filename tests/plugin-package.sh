@@ -95,37 +95,15 @@ EOF
   esac
 done
 
-# Regression coverage for commit 5ed99c5 ("fix bootstrap.sh dist-copy
-# drift-check false positive"): before that fix, the loop above did an
-# unconditional `cmp -s core/scripts/X.sh scripts/X.sh` for EVERY *.sh dist
-# wrapper. Since "collapse duplicate coordkit wrappers" (2c0a2fd) made every
-# plugins/coordkit/scripts/*.sh a templated delegating wrapper — never
-# byte-identical to its core/scripts counterpart — that plain cmp always
-# failed, a false positive on every .sh wrapper including bootstrap.sh (the
-# catch-all `exec bash core/scripts/bootstrap.sh "$@"` template, no special
-# case like common.sh/bus.sh/guard.sh). Assert directly that bootstrap.sh's
-# dist copy is NOT byte-identical to its core script — proving this test file
-# exercises the exact condition that used to false-positive, so a regression
-# back to plain `cmp -s` for .sh files would fail this assertion immediately.
+# Shell distribution files are wrappers, not copies. Keep this assertion so a
+# future byte-for-byte drift check cannot reject every valid wrapper.
 ! cmp -s "$PLUGIN/scripts/core/scripts/bootstrap.sh" "$PLUGIN/scripts/bootstrap.sh" || {
   printf 'expected plugins/coordkit/scripts/bootstrap.sh to be a templated wrapper, not byte-identical to core/scripts/bootstrap.sh (5ed99c5 regression?)\n' >&2
   exit 1
 }
 
-# Behavioral check for the bus.sh/guard.sh dual-mode wrapper (COORD-0001,
-# commit 3030519). The drift-check loop above only compares the wrapper's
-# TEXT against the expected template — it can't catch the wrapper actually
-# *misbehaving* when sourced, which is exactly how the original bug hid: an
-# unconditional `exec` silently replaced the SOURCING shell's own process
-# (adapters/codex/hook.sh does `. scripts/guard.sh` / `. scripts/bus.sh`),
-# so guard_check/guard_record_files/bus_run were never defined and the
-# anti-clobber guard + read-set fingerprinting silently no-opped.
-#
-# Source both dist wrappers exactly the way hook.sh does, from a throwaway
-# script, and assert: (1) the functions they exist to define actually land
-# in the sourcing shell's scope, and (2) the sourcing shell is still alive
-# afterward — proven by a marker printed AFTER the `.` lines, which would
-# never print if sourcing had exec-replaced the process instead.
+# bus.sh and guard.sh must work both as sourced libraries and direct commands.
+# The marker proves sourcing did not replace the caller with `exec`.
 source_probe="$(mktemp "${TMPDIR:-/tmp}/coordkit-source-probe.XXXXXX")"
 cat > "$source_probe" <<PROBE
 . "${PLUGIN}/scripts/guard.sh" || exit 1
@@ -142,9 +120,7 @@ test "$source_out" = "SOURCE_PROBE_ALIVE" || {
   exit 1
 }
 
-# Direct execution (cbus/cobus: `exec bus.sh <phase>`) must still behave
-# exactly like invoking core/scripts/*.sh directly — the dual-mode branch
-# must not have broken the top-level-script path while fixing the sourced one.
+# Direct execution must still match the core scripts.
 exec_probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/coordkit-exec-probe.XXXXXX")"
 git -C "$exec_probe_dir" init -q
 guard_dist_out="$(cd "$exec_probe_dir" && bash "$PLUGIN/scripts/guard.sh" status 2>&1)"
@@ -189,35 +165,16 @@ jq -e '
   and ([.hooks.SessionEnd[]?.hooks[]?.timeout // empty] | all(. <= 3))
 ' "$HOOKS" >/dev/null
 
-VALIDATE_PLUGIN="${VALIDATE_PLUGIN:-}"
-if [ -z "$VALIDATE_PLUGIN" ] && command -v validate_plugin.py >/dev/null 2>&1; then
-  VALIDATE_PLUGIN="$(command -v validate_plugin.py)"
-fi
+python3 "$ROOT/scripts/validate-package.py" "$ROOT" >/dev/null
 
-if [ -z "$VALIDATE_PLUGIN" ]; then
-  for skill_root in \
-    "${CODEX_HOME:-$HOME/.codex}/skills" \
-    "${AGENTS_HOME:-$HOME/.agents}/skills"
-  do
-    [ -d "$skill_root" ] || continue
-    VALIDATE_PLUGIN="$(
-      find "$skill_root" \
-        -path '*/plugin-creator/scripts/validate_plugin.py' \
-        -type f \
-        | LC_ALL=C sort \
-        | head -n 1
-    )"
-    if [ -n "$VALIDATE_PLUGIN" ]; then
-      break
-    fi
-  done
+# Maintainers may add an external validator explicitly, but package validation
+# never depends on tools installed outside this repository.
+if [ -n "${VALIDATE_PLUGIN:-}" ]; then
+  [ -f "$VALIDATE_PLUGIN" ] || {
+    printf 'VALIDATE_PLUGIN does not name a file: %s\n' "$VALIDATE_PLUGIN" >&2
+    exit 1
+  }
+  python3 "$VALIDATE_PLUGIN" "$PLUGIN" >/dev/null
 fi
-
-if [ -z "$VALIDATE_PLUGIN" ] || [ ! -f "$VALIDATE_PLUGIN" ]; then
-  printf 'validate_plugin.py not found; set VALIDATE_PLUGIN to a local plugin-creator validator\n' >&2
-  exit 1
-fi
-
-python3 "$VALIDATE_PLUGIN" "$PLUGIN" >/dev/null
 
 echo "plugin package: ok"

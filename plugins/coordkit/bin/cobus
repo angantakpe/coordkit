@@ -48,6 +48,8 @@ Verbs:
                               machines (relay long-poll / git sync / local)
   board                       show the projected task queue
   digest | catchup            full shared-context digest
+  msg <all|sid8|branch:name> "<text>"
+                              deliver a message to matching live instances
   note "<text>"               drop a durable note for all instances
   decide <subject> "<text>"   record a decision (latest per subject wins)
   ask <subject> "<q>"         open a question thread
@@ -122,6 +124,7 @@ case "${1:-}" in
   migrate)  shift; exec bash "${ROOT}/scripts/migrate.sh" "$@" ;;
   gc)       shift; exec bash "${ROOT}/scripts/gc.sh" "$@" ;;
   fleet)    shift; exec bash "${ROOT}/scripts/bus.sh" fleet "$@" ;;
+  msg)      shift; exec bash "${ROOT}/scripts/bus.sh" msg "$@" ;;
   heartbeat|peers|watch) exec bash "${ROOT}/scripts/presence.sh" "$@" ;;
   swarm)    shift; exec bash "${ROOT}/scripts/worker-runtime.sh" "$@" ;;
   agents)   shift; exec python3 "${ROOT}/scripts/agent-runtime.py" "$@" ;;

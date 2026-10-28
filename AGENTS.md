@@ -13,8 +13,8 @@ and release expectations. For plugin-runtime specifics, also read
 ## Repo Layout
 
 - `plugins/coordkit/scripts/core/`: source-of-truth coordination scripts.
-- `plugins/coordkit/scripts/`: synced distribution copy that should stay in
-  lockstep with `core/`.
+- `plugins/coordkit/scripts/`: packaged shell wrappers delegating to `core/`;
+  non-shell runtime copies must stay in lockstep with their core sources.
 - `plugins/coordkit/adapters/`: host-adapter docs and integration notes.
 - `plugins/coordkit/commands/README.md`: shared command-spec source of truth.
 - `docs/`: architecture, release, statusline, and transport docs.

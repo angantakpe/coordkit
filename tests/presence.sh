@@ -35,7 +35,7 @@ region = "ca-east"
 EOF
 export COORDKIT_PLUGIN_ROOT="$PLUGIN" COORDKIT_PROJECT_DIR="$repo" COORDKIT_BUS_ROOT="$repo"
 export COORDKIT_PLUGIN_DATA="$tmp/data-a" COORDKIT_MACHINE=laptop
-export COORDKIT_PRESENCE_DETECT_TASK=0
+export COORDKIT_PRESENCE_DETECT_TASK=0 COORDKIT_HOST=cli
 cobus() { "$PLUGIN/bin/cobus" "$@"; }
 
 # 1. emit + peers alive

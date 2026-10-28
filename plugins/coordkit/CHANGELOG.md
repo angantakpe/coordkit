@@ -16,6 +16,27 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## 5.3.1
+
+### Fixed
+- Route the documented `cobus msg` command to the bus inbox handler, including
+  its existing error for unmatched recipients. Message text remains literal.
+- Declare Claude agents as individual manifest paths so the host can validate
+  and discover the bundled catalog.
+- Make package checks work on a clean contributor or CI machine without a
+  separately installed plugin-validator skill. The repository-owned validator
+  checks manifest references, versions, package paths and executable entrypoints.
+- Isolate simulated Claude and CLI test identities from the surrounding Codex
+  session, and keep dispatch setup inside its lease before testing expiry.
+
+### Changed
+- Add focused test selection and explicit `make test TESTS="..."` execution.
+  CI and releases select affected regressions; `make test-all` remains an
+  explicit opt-in. Developer launch targets use the host's normal permissions.
+- Add public installation and hook-approval troubleshooting, contributor setup,
+  portable documentation links, release guidance, and issue/PR templates.
+- Document the canonical core and thin shell wrappers consistently.
+
 ## 5.3.0
 
 ### Added

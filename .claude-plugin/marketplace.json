@@ -11,7 +11,7 @@
       "name": "coordkit",
       "source": "./plugins/coordkit",
       "description": "Claude Code and Codex coordination bus, durable shared ledger, host-attributed collision warnings, authenticated relay replay, skill workflows, and opt-in hard anti-clobber enforcement. Warn-only by default.",
-      "version": "5.3.0",
+      "version": "5.3.1",
       "author": {
         "name": "codehornets",
         "email": "codehornets@gmail.com"

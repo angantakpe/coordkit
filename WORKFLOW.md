@@ -22,7 +22,7 @@ hooks:
   after_create: |
     git clone --depth 1 git@github.com:angantakpe/coordkit.git .
 agent:
-  max_concurrent_agents: 3
+  max_concurrent_agents: 1
   max_turns: 20
 codex:
   command: codex app-server

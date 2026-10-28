@@ -73,9 +73,11 @@ printf '%s' "$denied" | jq -e '.hookSpecificOutput.permissionDecision == "deny"'
 
 claude_start="$(jq -nc --arg cwd "$tmp" '{session_id:"claude-two",cwd:$cwd,hook_event_name:"SessionStart"}')"
 CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$tmp/plugin-data" \
+  COORDKIT_HOST=claude-code \
   bash "$PLUGIN/scripts/swarm.sh" session-start <<<"$claude_start" >/dev/null
 claude_edit="$(jq -nc --arg cwd "$tmp" --arg file "$tmp/demo.txt" '{session_id:"claude-two",cwd:$cwd,hook_event_name:"PostToolUse",tool_name:"Edit",tool_input:{file_path:$file}}')"
 CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$tmp/plugin-data" \
+  COORDKIT_HOST=claude-code \
   bash "$PLUGIN/scripts/swarm.sh" posttool-write <<<"$claude_edit" >/dev/null
 warning="$(COORDKIT_ENFORCEMENT=warn hook pretool-write "$patch_event")"
 printf '%s' "$warning" | jq -e '.hookSpecificOutput.additionalContext | contains("host=claude-code")' >/dev/null
