@@ -1,6 +1,6 @@
 {
   "name": "coordkit",
-  "version": "5.3.1",
+  "version": "5.3.2",
   "description": "Coordinate concurrent Codex and Claude Code sessions with a shared bus, ledger, anti-clobber guard, and optional cross-machine relay.",
   "author": {
     "name": "codehornets",

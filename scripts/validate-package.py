@@ -151,7 +151,6 @@ def validate_executables(plugin: Path) -> None:
         "adapters/hook.sh",
         "scripts/repo-memory-gate.sh",
         "scripts/agent-runtime.py",
-        "bin/coordkit-monitor",
         "bin/coordkit-subagent-statusline",
     )
     for relative in entrypoints:

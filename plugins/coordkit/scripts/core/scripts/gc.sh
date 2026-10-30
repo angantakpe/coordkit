@@ -13,6 +13,7 @@
 set -uo pipefail
 
 STALE_HARD=21600   # 6h — same threshold bus.sh uses to call an agent dead
+ORPHAN_AGE=604800  # 7d — undelivered inbox kept this long for a resumed session
 KEEP=350           # activity.log lines retained by a trim
 TRIM_AT=600        # trim only once the log exceeds this (matches the auto-trim)
 
@@ -40,7 +41,8 @@ Usage: cobus gc [--apply] [--keep N] [--nuke --yes-i-am-sure] [repo]
                      toplevel, else the current directory)
 
 Reaped: agent heartbeats older than 6h, claims with no live owner, cursors with
-no live agent, empty inbox dirs, and an oversized activity.log.
+no live agent, empty inbox dirs, inboxes whose recipient is gone and whose
+newest message is older than 7d, and an oversized activity.log.
 EOF
       exit 0 ;;
     -*) echo "gc: unknown option: $1" >&2; exit 2 ;;
@@ -105,7 +107,7 @@ agent_live() {
   [ $(( now - last )) -le "$STALE_HARD" ]
 }
 
-dead_agents=0 dead_claims=0 dead_cursors=0 empty_inboxes=0
+dead_agents=0 dead_claims=0 dead_cursors=0 empty_inboxes=0 orphan_inboxes=0 orphan_msgs=0
 
 # ── dead agent heartbeats ───────────────────────────────────────────────────
 for f in "$agents"/*.json; do
@@ -143,6 +145,26 @@ for d in "$inbox"/*/; do
   [ "$APPLY" = 1 ] && rmdir "$d" 2>/dev/null
 done
 
+# ── undeliverable inboxes: recipient gone, newest message past ORPHAN_AGE ───
+# Only a live recipient ever drains its inbox, so these messages can never be
+# read. The age floor leaves room for a resumed session to come back for them.
+for d in "$inbox"/*/; do
+  [ -d "$d" ] || continue
+  rsid="$(basename "$d")"
+  agent_live "$rsid" && continue
+  newest=0
+  for m in "$d"*.msg; do
+    [ -e "$m" ] || continue
+    mt="$(stat -c %Y "$m" 2>/dev/null || stat -f %m "$m" 2>/dev/null || echo 0)"
+    [ "$mt" -gt "$newest" ] && newest="$mt"
+  done
+  [ "$newest" -gt 0 ] || continue
+  [ $(( now - newest )) -gt "$ORPHAN_AGE" ] || continue
+  n="$(find "$d" -maxdepth 1 -name '*.msg' -type f 2>/dev/null | wc -l | tr -d ' ')"
+  orphan_inboxes=$(( orphan_inboxes + 1 )); orphan_msgs=$(( orphan_msgs + n ))
+  [ "$APPLY" = 1 ] && rm -rf "$d" 2>/dev/null
+done
+
 # ── activity.log ────────────────────────────────────────────────────────────
 lines=0; trimmed=0
 if [ -f "$log" ]; then
@@ -168,6 +190,7 @@ echo "gc: ${verb} ${dead_agents} dead agent record(s)"
 echo "gc: ${verb} ${dead_claims} orphaned claim(s)"
 echo "gc: ${verb} ${dead_cursors} orphaned cursor(s)"
 echo "gc: ${verb} ${empty_inboxes} empty inbox dir(s)"
+echo "gc: ${verb} ${orphan_inboxes} undeliverable inbox dir(s) (${orphan_msgs} message(s))"
 if [ "$trimmed" -gt 0 ]; then
   echo "gc: ${tverb} activity.log ${lines} -> ${KEEP} lines (${trimmed} dropped)"
 else

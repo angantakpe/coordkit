@@ -16,6 +16,20 @@ merged into coordkit the same way coordguard was at 3.0.0. Its historical
 entries are no longer on disk but remain in git history
 (`git log -- plugins/skillkit/`).
 
+## 5.3.2
+
+### Removed
+- Remove the Claude Code monitor (`bin/coordkit-monitor`, `monitors/monitors.json`).
+  Each line it printed woke every session in the repo for a full model turn, and
+  it only repeated the live, claim and inbox counts the statusline already shows.
+  Messages still reach the recipient on its next prompt through the
+  UserPromptSubmit hook.
+
+### Fixed
+- `cobus gc` now reaps inboxes whose recipient session is gone and whose newest
+  message is older than 7 days. Before, only empty inbox dirs were removed, so
+  undeliverable messages piled up indefinitely.
+
 ## 5.3.1
 
 ### Fixed

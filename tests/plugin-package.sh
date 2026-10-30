@@ -19,16 +19,18 @@ jq -e '
 ' "$HOOKS" >/dev/null
 for companion in \
   "$PLUGIN/.mcp.json" \
-  "$PLUGIN/.lsp.json" \
-  "$PLUGIN/monitors/monitors.json"
+  "$PLUGIN/.lsp.json"
 do
   test -f "$companion"
   jq -e . "$companion" >/dev/null
 done
+# Each monitor line wakes the model for a full turn, so the package must not
+# register one. The statusline and UserPromptSubmit hook carry this state.
+jq -e '.experimental.monitors == null' "$PLUGIN/.claude-plugin/plugin.json" >/dev/null
+test ! -e "$PLUGIN/monitors"
 test -x "$PLUGIN/adapters/hook.sh"
 test -x "$PLUGIN/scripts/repo-memory-gate.sh"
 test -x "$PLUGIN/scripts/agent-runtime.py"
-test -x "$PLUGIN/bin/coordkit-monitor"
 test -x "$PLUGIN/bin/coordkit-subagent-statusline"
 # Since "collapse duplicate coordkit wrappers", plugins/coordkit/scripts/*.sh
 # are thin delegating wrappers (not literal copies) around

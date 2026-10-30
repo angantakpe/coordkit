@@ -6,7 +6,7 @@
 #       Emit ONE `heartbeat` event into the shared log (every transport mode).
 #       Carries: machine name, actor, pid/session, cwd/repo, git branch, current
 #       task/claim, capabilities, ts, ttl_s. `--loop <s>` re-emits forever in
-#       the foreground (tmux pane / bin/coordkit-monitor / systemd), flushing the
+#       the foreground (tmux pane / background job / systemd), flushing the
 #       relay outbox each tick in relay mode.
 #   peers [--json] [--all] [--summary]
 #       Projection over heartbeat events: one row per (machine, actor, session)

@@ -112,8 +112,7 @@ machine instead:
 # tmux / a spare pane
 cobus heartbeat --loop 30 --cap gpu
 
-# alongside the Claude Code monitor (bin/coordkit-monitor is the plugin's
-# monitors.json entry; run the loop next to it, not inside a hook)
+# background job in a shell (not inside a hook)
 ( cd ~/repo && cobus heartbeat --loop 30 ) &
 
 # systemd --user unit
